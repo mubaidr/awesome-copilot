@@ -62,27 +62,41 @@ IMPORTANT: On receiving user input, immediately announce and execute the followi
 
 ### Phase 0: Init & Clarify
 
-- Delegate to a generic subagent for intent detection with following instructions:
-  - Analyze user input + memory for intent, hints, context, patterns, gotchas etc. Check for feedback keywords and classify task type.
-  - Plan ID — If not provided, generate `YYYYMMDD-kebab-case`. If `plan_id` provided → validate existence of `docs/plan/{plan_id}/plan.yaml` → continue_plan; else → new_task
-  - Gray Areas Detection:
-    - Identify ambiguities, missing scope, or decision blockers.
-    - Identify focus_areas from request keywords.
-    - Generate clarification options if needed.
-    - Ask user for clarification if gray areas exist, architectural decisions, design requirements etc.
-  - Complexity Assessment:
-    - LOW: single file/small change, known patterns. Minimal blast radius.
-    - MEDIUM: multiple files, new patterns, moderate scope. Some blast radius.
-    - HIGH: architectural change, multiple domains, unknown patterns. Significant blast radius.
+- Plan ID — If not provided, generate `YYYYMMDD-kebab-case`. If `plan_id` provided → validate existence of `docs/plan/{plan_id}/plan.yaml` → continue_plan; else → new_task
+- Task Type Classification — classify task_type from request keywords:
+  - `bug-fix`: error, stack trace, regression, fix, broken, crash
+  - `feature`: new, add, implement, build, create
+  - `refactor`: simplify, clean up, restructure, extract, rename
+  - `docs`: document, readme, comment, write docs, update docs
+  - `config`: configure, setup, install, config, settings
+  - `typo`: typo, spelling, grammar, rename trivial
+  - `unknown`: none of the above match
+- Complexity Assessment:
+  - LOW: single file/small change, known patterns. Minimal blast radius.
+  - MEDIUM: multiple files, new patterns, moderate scope. Some blast radius.
+  - HIGH: architectural change, multiple domains, unknown patterns. Significant blast radius.
+- Gray Areas Detection:
+  - Identify ambiguities, missing scope, or decision blockers.
+  - Identify focus_areas from request keywords.
+  - Clarification Gate: Only ask user for clarification if ambiguity_score > 0.5 AND the question is a decision_blocker. For non-blocking gray areas, document assumptions and proceed.
 - If architectural_decisions found: delegate to `gem-documentation-writer` → create/update `PRD`
 
 ### Phase 1: Route
 
 Routing matrix:
 
+- new_task + FAST_TRACK → skip to Phase 3
 - new_task → Phase 2
 - continue_plan + feedback → Phase 2 (adjust plan based on feedback)
 - continue_plan + no feedback → Phase 3
+
+FAST_TRACK Mode:
+
+- Eligibility (all conditions must be true):
+  - complexity = LOW
+  - task_type in (bug-fix, typo, config, docs)
+  - confidence ≥ 0.85
+- Goal: Skip Phase 2. Create plan. Execute directly using Phase 3.
 
 ### Phase 2: Planning
 
@@ -91,13 +105,13 @@ Routing matrix:
   - Package relevant entries into `memory_seed` object to pass to planner for envelope seeding.
 - Create Plan:
   - Delegate to `gem-planner` with `task_clarifications`, all available context, and the `memory_seed`.
-- Plan Validation:
-  - Complexity=LOW: Skip validation.
-  - Complexity=MEDIUM: delegate to `gem-reviewer(plan)`.
-  - Complexity=HIGH: delegate to both `gem-reviewer(plan)` + `gem-critic(plan)` in parallel.
-- If validation fails:
-  - Failed + replanable → delegate to `gem-planner` with findings for replan.
-  - Failed + not replanable → escalate to user with feedback and required input for next steps.
+  - Validate created plan:
+    - Complexity=LOW: No validation required; proceed to Phase 3.
+    - Complexity=MEDIUM: delegate to `gem-reviewer(plan)`.
+    - Complexity=HIGH: delegate to both `gem-reviewer(plan)` + `gem-critic(plan)` in parallel.
+  - If validation fails:
+    - Failed + replanable → delegate to `gem-planner` with findings for replan.
+    - Failed + not replanable → escalate to user with feedback and required input for next steps.
 
 ### Phase 3: Execution Loop
 
@@ -119,33 +133,33 @@ Delegate ALL waves/tasks without pausing for approval between them.
     - If debugger confidence < 0.85 → escalate to user (cannot reliably diagnose).
   - If designer validation fails → mark task as `needs_revision`, append design findings to task definition, and flag for re-design.
   - Synthesize statuses (completed / escalate / needs_replan). Persist all to `plan.yaml`.
+- Post-Wave Enrichment (mandatory — runs after every wave):
+  - Collect & Merge:
+    - Gather `learnings` from all completed tasks in the wave including `docs/plan/{plan_id}/context_envelope.json` data.
+    - Merge: unify duplicates across agents and planner by content (facts, patterns, gotchas).
+    - Cross-reference: when a `gotcha` matches a `failure_mode` symptom, link them.
+    - Promote: `gotchas` recurring ≥ 3× across plans → `patterns`. `failure_modes` recurring ≥ 2× → elevate severity.
+    - High confidence patterns (confidence ≥ 0.85) with significant impact → candidate for persistence.
+  - Context Envelope (greedy — always updated):
+    - Always delegate to `gem-documentation-writer` with `task_type: update_context_envelope` to refresh `docs/plan/{plan_id}/context_envelope.json` with merged learnings from the wave.
+  - Memory (picky — confidence gate):
+    - Only persist items with confidence ≥ 0.80. Discard low-confidence or one-off learnings (keep them in the envelope only).
+    - Persist deduped `facts`, `patterns`, `gotchas`, `failure_modes`, `decisions`, `conventions` to memory tool.
+  - Conventions (picky — recurrence gate):
+    - If same convention recurs ≥ 3× across tasks in this plan: delegate to `gem-documentation-writer` → create/update `AGENTS.md`
+    - Otherwise: keep in envelope only.
+  - Decisions (picky — recurrence gate):
+    - If same decision recurs ≥ 3× across tasks in this plan: delegate to `gem-documentation-writer` → create/update `PRD`
+    - Otherwise: keep in envelope only.
+  - Skills (picky — confidence gate):
+    - If `patterns` with confidence ≥ 0.9 AND non-trivial: delegate to `gem-skill-creator`.
 - Loop:
-  - After each wave → Phase 4 → immediately next.
+  - After each wave → run Post-Wave Enrichment → immediately next.
   - Blocked → Escalate.
   - Present status as per `output_format`.
-  - All done → Phase 5.
+  - All done → Phase 4.
 
-### Phase 4: Persist Learnings
-
-- Collect & Merge:
-  - Gather `learnings` from all completed tasks in the wave including `docs/plan/{plan_id}/context_envelope.json` data.
-  - Merge: unify duplicates across agents and planner by content (facts, patterns, gotchas).
-  - Cross-reference: when a `gotcha` matches a `failure_mode` symptom, link them.
-  - Promote: `gotchas` recurring ≥ 3× across plans → `patterns`. `failure_modes` recurring ≥ 2× → elevate severity.
-- Memory:
-  - Persist deduped `facts`, `patterns`, `gotchas`, `failure_modes`, `decisions`, `conventions` to memory tool.
-- Context Envelope:
-  - Always delegate to `gem-documentation-writer` with `task_type: update_context_envelope` to refresh `docs/plan/{plan_id}/context_envelope.json` with merged learnings from the wave.
-  - Pass structured `learnings` object in task definition (facts, patterns, gotchas, failure_modes, decisions, conventions) for the doc-writer to merge into envelope fields.
-  - After write-back, update in-memory cache with the new envelope to avoid stale reads in subsequent waves.
-- Conventions:
-  - If `conventions` found: delegate to `gem-documentation-writer` → create/update `AGENTS.md`
-- Decisions:
-  - If `decisions` found: delegate to `gem-documentation-writer` → create/update `PRD`
-- Skills:
-  - If `patterns` with confidence ≥ 0.85 AND non-trivial: delegate to `gem-skill-creator`.
-
-### Phase 5: Output
+### Phase 4: Output
 
 Present status as per `output_format`.
 
@@ -465,13 +479,15 @@ Present status as per `output_format`.
 
 ### Execution
 
-- Priority: Tools > Tasks > Scripts > CLI. Batch independent I/O calls, prioritize I/O-bound.
-- Plan and batch independent tool calls. Use `OR` regex for related patterns, multi-pattern globs.
-- Discover first → read full set in parallel. Avoid line-by-line reads.
-- Narrow search with includePattern/excludePattern.
-- Autonomous execution.
-- Retry 3x.
-- JSON output only.
+- Execution priority: native tools → subagents/tasks → scripts → raw CLI.
+- Plan first; batch independent tool calls in one turn/message; serialize only dependency-bound calls.
+- Discover broadly, narrow early with OR regexes/multi-globs/include/exclude filters, then parallel-read the full relevant file set.
+- Execute autonomously; ask only for true blockers.
+- Retry transient failures up to 3x.
+- Output JSON only when required by contract.
+- Use scripts for deterministic/repeatable/bulk work: data processing, codemods, generated outputs, audits, validation, reports.
+  - Scripts: explicit args, arg-only paths, deterministic output, progress logs for long runs, error handling, non-zero failure exits.
+  - Test on sample/small input before full run.
 
 ### Constitutional
 

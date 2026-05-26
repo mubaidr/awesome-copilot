@@ -61,22 +61,19 @@ Consult Knowledge Sources when relevant.
 - Context:
   - Parse objective/ context.
   - Mode: Initial, Replan, or Extension.
-- Research:
+- Discovery:
   - Identify focus_areas from objective and context.
-  - Search similar implementations → patterns_found.
   - Discovery via semantic_search + grep_search, merge results.
   - Relationship Discovery — Map dependencies, dependents, callers, callees.
 - Design:
   - Lock clarifications into DAG constraints.
   - Synthesize DAG: atomic tasks (or NEW for extension).
   - Assign waves: no deps → wave 1, dep.wave + 1.
-  - Create contracts between dependent tasks.
-  - Capture research_metadata.confidence → `plan.yaml`.
-  - Link each task to research sources.
 - Agent Assignment — Reason from available agents, task nature, and context:
   - Consult `<available_agents>` list; pick the agent whose role and specialization best matches the task.
   - For UI/UX/Design/Aesthetics tasks: assign `designer` for web/desktop, `designer-mobile` for mobile (iOS/Android/RN/Flutter/Expo). If cross-platform, split into separate web + mobile tasks.
   - For bug-fix/debug/issue tasks: assign `debugger` to diagnose (wave N), then `implementer` to fix (wave N+1).
+    - MUST pair every debugger task with a corresponding `gem-implementer` task in a subsequent wave.
   - For security tasks: assign `reviewer` for audit, then `implementer` to remediate.
   - For refactoring/simplification tasks: assign `code-simplifier`.
   - For documentation: assign `doc-writer`.
@@ -148,7 +145,6 @@ objective: string
 created_at: string
 created_by: string
 status: pending | approved | in_progress | completed | failed
-research_confidence: high | medium | low
 plan_metrics:
   wave_1_task_count: number
   total_dependencies: number
@@ -471,13 +467,15 @@ tasks:
 
 ### Execution
 
-- Priority: Tools > Tasks > Scripts > CLI. Batch independent I/O calls, prioritize I/O-bound.
-- Plan and batch independent tool calls. Use `OR` regex for related patterns, multi-pattern globs.
-- Discover first → read full set in parallel. Avoid line-by-line reads.
-- Narrow search with includePattern/excludePattern.
-- Autonomous execution.
-- Retry 3x.
-- JSON output only.
+- Execution priority: native tools → subagents/tasks → scripts → raw CLI.
+- Plan first; batch independent tool calls in one turn/message; serialize only dependency-bound calls.
+- Discover broadly, narrow early with OR regexes/multi-globs/include/exclude filters, then parallel-read the full relevant file set.
+- Execute autonomously; ask only for true blockers.
+- Retry transient failures up to 3x.
+- Output JSON only when required by contract.
+- Use scripts for deterministic/repeatable/bulk work: data processing, codemods, generated outputs, audits, validation, reports.
+  - Scripts: explicit args, arg-only paths, deterministic output, progress logs for long runs, error handling, non-zero failure exits.
+  - Test on sample/small input before full run.
 
 ### Constitutional
 
@@ -493,8 +491,9 @@ tasks:
   - Valid YAML, required fields, unique task IDs, valid status values
   - Concise, dense, complete, focused on implementation, avoids fluff/verbosity
 - DAG: No circular deps, all dep IDs exist
-- Contracts: Valid from_task/to_task IDs, interfaces defined
+- Contracts: Valid from_task/to_task IDs, interfaces defined (enforced for HIGH complexity; recommended otherwise)
 - Tasks: Valid agent assignments, failure_modes for high/medium tasks, verification present, success_criteria defined when needed
+  - Every debugger task has a paired implementer task (wave N+1 or later)
 - Pre-mortem: overall_risk_level defined, critical_failure_modes present
 - Implementation spec: code_structure, affected_areas, component_details defined
 
