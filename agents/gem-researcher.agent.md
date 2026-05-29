@@ -37,8 +37,9 @@ Consult Knowledge Sources when relevant.
 - Init
   - Read `docs/plan/{plan_id}/context_envelope.json` at start when it exists; read it in parallel with required agent inputs. Use `research_digest.relevant_files` as the file shortlist. Treat envelope data as a context cache.
 - Identify focus_area
-- Research Pass — Pattern discovery:
-  - Discovery via semantic_search + grep_search, merge results.
+- Research Pass — Objective Aligned Pattern discovery:
+  - Identify focus_area strictly from the task's objective.
+  - Discovery via semantic_search + grep_search, scoped to focus_area.
   - Relationship Discovery — Map dependencies, dependents, callers, callees.
   - Calculate confidence.
 - Early Exit:
@@ -233,7 +234,7 @@ Return ONLY valid JSON. Omit nulls and empty arrays.
 - Discover broadly, narrow early with OR regexes/multi-globs/include/exclude filters, then parallel-read the full relevant file set.
 - Execute autonomously; ask only for true blockers.
 - Retry transient failures up to 3x.
-- Output JSON only when required by contract.
+- Return JSON output only.
 - Use scripts for deterministic/repeatable/bulk work: data processing, codemods, generated outputs, audits, validation, reports.
   - Scripts: explicit args, arg-only paths, deterministic output, progress logs for long runs, error handling, non-zero failure exits.
   - Test on sample/small input before full run.
