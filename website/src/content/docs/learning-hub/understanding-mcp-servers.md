@@ -3,7 +3,7 @@ title: 'Understanding MCP Servers'
 description: 'Learn how Model Context Protocol servers extend GitHub Copilot with access to external tools, databases, and APIs.'
 authors:
   - GitHub Copilot Learning Hub Team
-lastUpdated: 2026-05-07
+lastUpdated: 2026-07-06
 estimatedReadingTime: '8 minutes'
 tags:
   - mcp
@@ -66,6 +66,7 @@ MCP servers are configured per-workspace. GitHub Copilot CLI discovers server de
 | File | Scope | Notes |
 |------|-------|-------|
 | `.mcp.json` | Repository root | Preferred for repo-shared configuration |
+| `.github/mcp.json` | Repository `.github/` folder | Auto-loaded workspace config (v1.0.61+) |
 | `.vscode/mcp.json` | VS Code workspace | VS Code–compatible workspace config |
 | `devcontainer.json` | Dev container | Available when running inside a container |
 
@@ -93,15 +94,15 @@ Example `.mcp.json` or `.vscode/mcp.json`:
 
 ### Installing MCP Servers from the Registry
 
-GitHub Copilot CLI can install MCP servers directly from the official registry with guided configuration — no manual JSON editing required. During an interactive session, run:
+GitHub Copilot CLI provides a registry-based install flow that lets you browse and install MCP servers with guided configuration — no manual JSON editing required. In v1.0.64+, use the `/mcp registry` sub-command to browse available servers:
 
 ```
-/mcp install
+/mcp registry
 ```
 
 A picker will list available servers from the registry. After selecting one, the CLI prompts for any required configuration values (connection strings, API keys, etc.) and writes the completed entry to your persistent MCP config automatically.
 
-You can also install a specific server by name without the picker:
+You can also install a specific server by name directly:
 
 ```
 /mcp install @modelcontextprotocol/server-postgres
@@ -118,6 +119,18 @@ This guided flow is the recommended way to add new MCP servers, especially for s
 **env**: Environment variables passed to the server process. Use these for connection strings, API keys, and configuration—never hardcode secrets in the JSON file.
 
 **type** (remote servers): The transport type for remote MCP servers (`http` or `sse`). This field can now be omitted — the CLI defaults to `http` when no type is specified, simplifying remote server configuration.
+
+**deferTools** *(optional, v1.0.63+)*: When set to `false`, the server's tools are always available even when tool search is enabled. By default, tool search can hide rarely-used MCP tools to reduce context noise; setting `deferTools: false` on a server prevents its tools from being deferred, keeping them permanently in the tool list.
+
+### Allowing MCP Server Instructions
+
+By default, Copilot CLI limits which MCP server instructions are injected into the system prompt, to avoid noisy or unexpected instructions from servers you may not have fully reviewed. You can opt in to include instructions from **all** connected MCP servers with the `--allow-all-mcp-server-instructions` flag *(v1.0.66+)*:
+
+```bash
+copilot --allow-all-mcp-server-instructions
+```
+
+Use this only with servers you fully trust, since their instructions can influence how Copilot responds throughout the entire session. For most projects, the default behavior is sufficient — only enable this if a specific server requires it (for example, an internal tool whose instructions you control).
 
 ### Managing Persistent MCP Configuration via Server RPCs
 
@@ -281,6 +294,16 @@ For example, a PostgreSQL server that can't connect because `DATABASE_URL` is no
 /mcp show              # list all servers and their status
 /mcp show postgres     # inspect a specific server
 ```
+
+**Viewing attached servers with `/mcp list`** (v1.0.69+): Use `/mcp list` to see which MCP servers are currently attached to your session and their status. Unlike `/mcp show` (which shows all configured servers), `/mcp list` focuses on what's active right now and can run **while the agent is working** — useful for checking server status mid-turn without interrupting the agent:
+
+```
+/mcp list              # show servers attached to this session
+```
+
+You can also open the `/mcp` manager while the agent is working to toggle servers on or off mid-turn. Add, edit, delete, and re-auth actions wait until the turn finishes, but enabling or disabling a server takes effect immediately.
+
+**Toggling servers on and off** (v1.0.66+): From the `/mcp` list view, you can **enable or disable individual MCP servers** without editing your config file. Select a server in the list and toggle it — disabled servers won't start in future sessions and their tools won't be available to agents. This is useful for temporarily disabling a server that's causing slowdowns or errors without removing it from your configuration entirely.
 
 **Common causes and fixes**:
 

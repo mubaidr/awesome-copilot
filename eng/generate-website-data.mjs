@@ -97,6 +97,29 @@ function formatDisplayName(value) {
     .join(" ");
 }
 
+function normalizeText(value, fallback = "") {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+/**
+ * Normalize an author value (npm string form or { name, url } object) to
+ * { name, url? } | null. Returns null when no usable name is present.
+ */
+function normalizeAuthor(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const name = value.trim();
+    return name ? { name } : null;
+  }
+  if (typeof value === "object") {
+    const name = normalizeText(value.name);
+    if (!name) return null;
+    const url = normalizeText(value.url);
+    return url ? { name, url } : { name };
+  }
+  return null;
+}
+
 /**
  * Find the latest git-modified date for any file under a directory.
  */
@@ -537,6 +560,7 @@ function getAgentFiles(agentDir, pluginRootPath) {
  */
 function generatePluginsData(gitDates) {
   const plugins = [];
+  const extensionEntriesByName = new Map();
 
   if (!fs.existsSync(PLUGINS_DIR)) {
     return { items: [], filters: { tags: [] } };
@@ -545,6 +569,53 @@ function generatePluginsData(gitDates) {
   const pluginDirs = fs
     .readdirSync(PLUGINS_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory());
+
+  if (fs.existsSync(EXTENSIONS_DIR)) {
+    const extensionDirs = fs.readdirSync(EXTENSIONS_DIR, { withFileTypes: true })
+      .filter((entry) => {
+        if (!entry.isDirectory()) return false;
+        return fs.existsSync(path.join(EXTENSIONS_DIR, entry.name, "extension.mjs"));
+      })
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
+
+    for (const extensionDirName of extensionDirs) {
+      const extensionDir = path.join(EXTENSIONS_DIR, extensionDirName);
+      const pluginJsonPath = path.join(extensionDir, ".github", "plugin", "plugin.json");
+      if (!fs.existsSync(pluginJsonPath)) {
+        continue;
+      }
+
+      try {
+        const extensionPlugin = JSON.parse(fs.readFileSync(pluginJsonPath, "utf-8"));
+        const pluginName = normalizeText(extensionPlugin.name, extensionDirName);
+        const pluginDescription = normalizeText(extensionPlugin.description, "Canvas extension");
+        const extensionKeywords = Array.isArray(extensionPlugin.keywords)
+          ? [...new Set(extensionPlugin.keywords.filter((keyword) => typeof keyword === "string").map((keyword) => keyword.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+          : [];
+        const relPath = `extensions/${extensionDirName}`;
+        const extensionItem = {
+          kind: "extension",
+          path: relPath,
+        };
+
+        extensionEntriesByName.set(pluginName, {
+          id: pluginName,
+          name: pluginName,
+          description: pluginDescription,
+          path: relPath,
+          tags: extensionKeywords,
+          itemCount: 1,
+          items: [extensionItem],
+          generatedFromExtension: true,
+          lastUpdated: getDirectoryLastUpdated(gitDates, relPath),
+          searchText: `${pluginName} ${pluginDescription} ${extensionKeywords.join(" ")} canvas extension`.toLowerCase(),
+        });
+      } catch (e) {
+        console.warn(`Failed to parse extension plugin manifest for ${extensionDirName}: ${e.message}`);
+      }
+    }
+  }
 
   for (const dir of pluginDirs) {
     const pluginDir = path.join(PLUGINS_DIR, dir.name);
@@ -555,7 +626,18 @@ function generatePluginsData(gitDates) {
     try {
       const data = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
       const relPath = `plugins/${dir.name}`;
-      const dates = gitDates[relPath] || gitDates[`${relPath}/`] || {};
+      const extensionRefs = Array.isArray(data?.["x-awesome-copilot"]?.extensions)
+        ? data["x-awesome-copilot"].extensions
+        : [];
+      const extensionItems = extensionRefs
+        .map((entry) => normalizeText(entry))
+        .filter(Boolean)
+        .map((entry) => entry.replace(/^\.\/+/, "").replace(/\/$/, ""))
+        .filter((entry) => entry.startsWith("extensions/"))
+        .map((entry) => ({
+          kind: "extension",
+          path: entry,
+        }));
 
       const agentItems = (data.agents || []).flatMap((agent) => {
         const agentPath = agent.replace("./", "");
@@ -578,25 +660,32 @@ function generatePluginsData(gitDates) {
         ...agentItems,
         ...(data.commands || []).map((p) => ({ kind: "prompt", path: p })),
         ...(data.skills || []).map((p) => ({ kind: "skill", path: p })),
+        ...extensionItems,
       ];
 
       const tags = data.keywords || data.tags || [];
+      const pluginName = data.name || dir.name;
 
       plugins.push({
         id: dir.name,
-        name: data.name || dir.name,
+        name: pluginName,
         description: data.description || "",
         path: relPath,
         tags: tags,
         itemCount: items.length,
         items: items,
-        lastUpdated: dates.lastModified || null,
-        searchText: `${data.name || dir.name} ${data.description || ""
+        lastUpdated: getDirectoryLastUpdated(gitDates, relPath),
+        searchText: `${pluginName} ${data.description || ""
           } ${tags.join(" ")}`.toLowerCase(),
       });
+      extensionEntriesByName.delete(pluginName);
     } catch (e) {
       console.warn(`Failed to parse plugin: ${dir.name}`, e.message);
     }
+  }
+
+  for (const extensionPlugin of extensionEntriesByName.values()) {
+    plugins.push(extensionPlugin);
   }
 
   // Load external plugins from plugins/external.json
@@ -670,33 +759,597 @@ function generatePluginsData(gitDates) {
 /**
  * Generate canvas extensions metadata
  */
-function generateExtensionsData(gitDates, commitSha) {
-  const extensions = [];
+function getImageMimeType(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  const mimeByExtension = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+  };
+  return mimeByExtension[extension] || "application/octet-stream";
+}
+
+function resolveImageUrl(value, ref) {
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+  const repoPath = normalized.replace(/\\/g, "/").replace(/^\/+/, "");
+  return buildRepoImageUrl(repoPath, ref);
+}
+
+function getImageAssetFiles(extensionDir) {
+  const assetDir = path.join(extensionDir, "assets");
+
+  if (!fs.existsSync(assetDir)) {
+    return [];
+  }
+
+  const imageExtensions = new Set([
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+  ]);
+
+  return fs
+    .readdirSync(assetDir)
+    .filter((file) => imageExtensions.has(path.extname(file).toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function pickAssetFile(files, preferredNames) {
+  const preferredLookup = new Set(preferredNames.map((name) => name.toLowerCase()));
+  for (const file of files) {
+    if (preferredLookup.has(file.toLowerCase())) {
+      return file;
+    }
+  }
+  return files[0] || null;
+}
+
+function getExtensionAssetInfo(extensionDir, relPath, ref) {
+  const files = getImageAssetFiles(extensionDir);
+
+  if (files.length === 0) {
+    return null;
+  }
+
+  const iconAsset = pickAssetFile(files, [
+    "icon.png",
+    "icon.jpg",
+    "icon.jpeg",
+    "icon.webp",
+    "icon.gif",
+    "preview.png",
+    "preview.jpg",
+    "preview.jpeg",
+    "preview.webp",
+    "preview.gif",
+    "screenshot.png",
+    "screenshot.jpg",
+    "screenshot.jpeg",
+    "screenshot.webp",
+    "screenshot.gif",
+    "image.png",
+    "image.jpg",
+    "image.jpeg",
+    "image.webp",
+    "image.gif",
+  ]);
+  const galleryAsset = pickAssetFile(files, [
+    "gallery.png",
+    "gallery.jpg",
+    "gallery.jpeg",
+    "gallery.webp",
+    "gallery.gif",
+    "preview.png",
+    "preview.jpg",
+    "preview.jpeg",
+    "preview.webp",
+    "preview.gif",
+    "screenshot.png",
+    "screenshot.jpg",
+    "screenshot.jpeg",
+    "screenshot.webp",
+    "screenshot.gif",
+    "image.png",
+    "image.jpg",
+    "image.jpeg",
+    "image.webp",
+    "image.gif",
+  ]);
+
+  const iconFile = iconAsset || galleryAsset;
+  const galleryFile = galleryAsset || iconAsset;
+  const iconPath = iconFile ? `${relPath}/assets/${iconFile}` : null;
+  const galleryPath = galleryFile ? `${relPath}/assets/${galleryFile}` : null;
+
+  return {
+    screenshots: {
+      icon: iconPath
+        ? {
+          path: iconPath,
+          type: getImageMimeType(iconPath),
+        }
+        : null,
+      gallery: galleryPath
+        ? {
+          path: galleryPath,
+          type: getImageMimeType(galleryPath),
+        }
+        : null,
+    },
+    assetPath: iconPath,
+    imageUrl: iconPath ? buildRepoImageUrl(iconPath, ref) : null,
+  };
+}
+
+function buildRepoImageUrl(assetPath, ref) {
+  const encodedAssetPath = assetPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `https://raw.githubusercontent.com/github/awesome-copilot/${ref}/${encodedAssetPath}`;
+}
+
+function extractCanvasMetadataFromSource(source) {
+  const constants = new Map();
+  const constantPattern =
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`([^`$]*)`)\s*;/g;
+  let constantMatch = constantPattern.exec(source);
+  while (constantMatch) {
+    const key = constantMatch[1];
+    const value = constantMatch[2] ?? constantMatch[3] ?? constantMatch[4] ?? "";
+    constants.set(key, value.replace(/\\n/g, "\n").trim());
+    constantMatch = constantPattern.exec(source);
+  }
+
+  function resolveExpression(expr) {
+    const trimmed = normalizeText(expr);
+    if (!trimmed) return null;
+    if (
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+      return trimmed
+        .slice(1, -1)
+        .replace(/\\n/g, "\n")
+        .replace(/\\"/g, '"')
+        .replace(/\\'/g, "'");
+    }
+    if (trimmed.startsWith("`") && trimmed.endsWith("`") && !trimmed.includes("${")) {
+      return trimmed.slice(1, -1);
+    }
+    return constants.get(trimmed) || null;
+  }
+
+  function findMatchingBrace(startIndex) {
+    let depth = 0;
+    let inSingle = false;
+    let inDouble = false;
+    let inTemplate = false;
+    let escaped = false;
+    for (let i = startIndex; i < source.length; i++) {
+      const char = source[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (!inDouble && !inTemplate && char === "'" && !inSingle) {
+        inSingle = true;
+        continue;
+      }
+      if (inSingle && char === "'") {
+        inSingle = false;
+        continue;
+      }
+      if (!inSingle && !inTemplate && char === '"' && !inDouble) {
+        inDouble = true;
+        continue;
+      }
+      if (inDouble && char === '"') {
+        inDouble = false;
+        continue;
+      }
+      if (!inSingle && !inDouble && char === "`" && !inTemplate) {
+        inTemplate = true;
+        continue;
+      }
+      if (inTemplate && char === "`") {
+        inTemplate = false;
+        continue;
+      }
+      if (inSingle || inDouble || inTemplate) {
+        continue;
+      }
+      if (char === "{") depth++;
+      if (char === "}") {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  function readProp(head, key) {
+    const pattern = new RegExp(`\\b${key}\\s*:\\s*([^,\\n]+)`);
+    const match = pattern.exec(head);
+    return resolveExpression(match?.[1]);
+  }
+
+  const canvases = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const createCanvasIndex = source.indexOf("createCanvas(", cursor);
+    if (createCanvasIndex === -1) {
+      break;
+    }
+    const objectStart = source.indexOf("{", createCanvasIndex);
+    if (objectStart === -1) {
+      break;
+    }
+    const objectEnd = findMatchingBrace(objectStart);
+    if (objectEnd === -1) {
+      break;
+    }
+    const objectContent = source.slice(objectStart + 1, objectEnd);
+    const header = objectContent.slice(0, 1400);
+    const id = readProp(header, "id");
+    const displayName = readProp(header, "displayName");
+    const description = readProp(header, "description");
+    if (id || displayName || description) {
+      canvases.push({
+        id: id || null,
+        displayName: displayName || null,
+        description: description || null,
+      });
+    }
+    cursor = objectEnd + 1;
+  }
+
+  return canvases;
+}
+
+function getExtensionCanvasFiles(extensionDir) {
+  const queue = [extensionDir];
+  const files = [];
+  while (queue.length > 0) {
+    const currentDir = queue.shift();
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolutePath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(absolutePath);
+      } else if (entry.isFile() && entry.name.endsWith(".mjs")) {
+        files.push(absolutePath);
+      }
+    }
+  }
+  return files.sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeExternalScreenshotRole(value, ref) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const type = getImageMimeType(value);
+    return {
+      path: value.replace(/\\/g, "/"),
+      type,
+      imageUrl: resolveImageUrl(value, ref),
+    };
+  }
+  const pathValue = normalizeText(value.path);
+  const urlValue = normalizeText(value.url);
+  if (!pathValue && !urlValue) return null;
+  const imagePath = pathValue ? pathValue.replace(/\\/g, "/") : null;
+  const type = normalizeText(value.type) || getImageMimeType(imagePath || urlValue);
+  const imageUrl = resolveImageUrl(urlValue || imagePath, ref);
+  return {
+    path: imagePath,
+    type,
+    imageUrl,
+  };
+}
+
+function normalizeExtensionScreenshotRole(value, relPath, ref) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    if (/^https?:\/\//i.test(value)) {
+      return {
+        path: null,
+        type: getImageMimeType(value),
+        imageUrl: value,
+      };
+    }
+
+    const normalized = value.replace(/\\/g, "/").replace(/^\.\/+/, "");
+    const repoPath = normalized.startsWith(`${relPath}/`) ? normalized : `${relPath}/${normalized}`;
+    return {
+      path: repoPath,
+      type: getImageMimeType(repoPath),
+      imageUrl: buildRepoImageUrl(repoPath, ref),
+    };
+  }
+
+  const pathValue = normalizeText(value.path);
+  const urlValue = normalizeText(value.url);
+  if (!pathValue && !urlValue) return null;
+  const pathEntry = pathValue
+    ? normalizeExtensionScreenshotRole(pathValue, relPath, ref)
+    : null;
+  const urlEntry = urlValue
+    ? normalizeExtensionScreenshotRole(urlValue, relPath, ref)
+    : null;
+
+  return {
+    path: pathEntry?.path || null,
+    type: normalizeText(value.type) || pathEntry?.type || urlEntry?.type || null,
+    imageUrl: urlEntry?.imageUrl || pathEntry?.imageUrl || null,
+  };
+}
+
+function resolveExtensionScreenshots(pluginJson, extensionDir, relPath, ref) {
+  const inferredAssets = getExtensionAssetInfo(extensionDir, relPath, ref);
+  const inferredIcon = inferredAssets?.screenshots?.icon
+    ? {
+      path: inferredAssets.screenshots.icon.path,
+      type: inferredAssets.screenshots.icon.type,
+      imageUrl: inferredAssets.screenshots.icon.path
+        ? buildRepoImageUrl(inferredAssets.screenshots.icon.path, ref)
+        : null,
+    }
+    : null;
+  const inferredGallery = inferredAssets?.screenshots?.gallery
+    ? {
+      path: inferredAssets.screenshots.gallery.path,
+      type: inferredAssets.screenshots.gallery.type,
+      imageUrl: inferredAssets.screenshots.gallery.path
+        ? buildRepoImageUrl(inferredAssets.screenshots.gallery.path, ref)
+        : null,
+    }
+    : null;
+
+  const logoEntry = normalizeExtensionScreenshotRole(pluginJson?.logo, relPath, ref);
+  const screenshotConfig = pluginJson?.["x-awesome-copilot"]?.screenshots || {};
+  const iconEntry = normalizeExtensionScreenshotRole(screenshotConfig.icon, relPath, ref);
+  const galleryRaw = screenshotConfig.gallery;
+  const firstGalleryEntry = Array.isArray(galleryRaw) ? galleryRaw[0] : galleryRaw;
+  const galleryEntry = normalizeExtensionScreenshotRole(firstGalleryEntry, relPath, ref);
+
+  const finalIcon = iconEntry || logoEntry || inferredIcon;
+  const finalGallery = galleryEntry || logoEntry || inferredGallery || finalIcon;
+
+  return {
+    screenshots: {
+      icon: finalIcon
+        ? {
+          path: finalIcon.path,
+          type: finalIcon.type,
+        }
+        : null,
+      gallery: finalGallery
+        ? {
+          path: finalGallery.path,
+          type: finalGallery.type,
+        }
+        : null,
+    },
+    assetPath: finalIcon?.path || inferredAssets?.assetPath || null,
+    imageUrl: finalIcon?.imageUrl || inferredAssets?.imageUrl || null,
+  };
+}
+
+function generateCanvasManifest(gitDates, commitSha) {
+  const items = [];
 
   if (!fs.existsSync(EXTENSIONS_DIR)) {
-    return { items: [] };
+    return { items: [], filters: { keywords: [] } };
   }
 
   const extensionDirs = fs
     .readdirSync(EXTENSIONS_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory());
+    .filter((entry) => {
+      if (!entry.isDirectory()) return false;
+      const extensionEntryPoint = path.join(
+        EXTENSIONS_DIR,
+        entry.name,
+        "extension.mjs"
+      );
+      return fs.existsSync(extensionEntryPoint);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   for (const dir of extensionDirs) {
     const relPath = `extensions/${dir.name}`;
-    extensions.push({
-      id: dir.name,
-      name: formatDisplayName(dir.name),
-      path: relPath,
-      ref: commitSha,
-      lastUpdated: getDirectoryLastUpdated(gitDates, relPath),
-    });
+    const extensionDir = path.join(EXTENSIONS_DIR, dir.name);
+    const packageJsonPath = path.join(extensionDir, "package.json");
+    const packageJson = fs.existsSync(packageJsonPath)
+      ? JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"))
+      : {};
+    const pluginJsonPath = path.join(extensionDir, ".github", "plugin", "plugin.json");
+    const pluginJson = fs.existsSync(pluginJsonPath)
+      ? JSON.parse(fs.readFileSync(pluginJsonPath, "utf-8"))
+      : {};
+    const keywordsSource = Array.isArray(pluginJson.keywords)
+      ? pluginJson.keywords
+      : Array.isArray(packageJson.keywords)
+        ? packageJson.keywords
+        : [];
+    const keywords = [...new Set(
+      keywordsSource
+        .filter((keyword) => typeof keyword === "string")
+        .map((keyword) => keyword.trim())
+        .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b));
+    const extensionDescription = normalizeText(
+      pluginJson.description,
+      normalizeText(packageJson.description, "Canvas extension")
+    );
+    const extensionName = normalizeText(pluginJson.name, normalizeText(packageJson.name, dir.name));
+    const extensionVersion = normalizeText(pluginJson.version, normalizeText(packageJson.version, "1.0.0"));
+    const screenshots = resolveExtensionScreenshots(pluginJson, extensionDir, relPath, commitSha);
+    const canvasFiles = getExtensionCanvasFiles(extensionDir);
+    const canvases = [];
+    for (const canvasFile of canvasFiles) {
+      const source = fs.readFileSync(canvasFile, "utf-8");
+      canvases.push(...extractCanvasMetadataFromSource(source));
+    }
+    const canvasEntries = canvases.length > 0
+      ? canvases
+      : [{ id: dir.name, displayName: formatDisplayName(dir.name), description: extensionDescription }];
+    const installUrl = `https://github.com/github/awesome-copilot/tree/main/${relPath.replace(
+      /\\/g,
+      "/"
+    )}`;
+    const installCommand = `copilot plugin install ${extensionName}@awesome-copilot`;
+
+    for (const canvas of canvasEntries) {
+      const canvasId = normalizeText(canvas.id, dir.name);
+      const canvasName = normalizeText(canvas.displayName, formatDisplayName(canvasId));
+      const canvasDescription = normalizeText(extensionDescription, canvas.description);
+      items.push({
+        id: canvasId,
+        canvasId,
+        extensionId: dir.name,
+        extensionName,
+        pluginName: extensionName,
+        name: canvasName,
+        version: extensionVersion,
+        description: canvasDescription,
+        path: relPath,
+        ref: commitSha,
+        lastUpdated: getDirectoryLastUpdated(gitDates, relPath),
+        screenshots: screenshots?.screenshots || { icon: null, gallery: null },
+        imageUrl: screenshots?.imageUrl || null,
+        assetPath: screenshots?.assetPath || null,
+        installUrl,
+        installCommand,
+        sourceUrl: null,
+        external: false,
+        author: normalizeAuthor(pluginJson.author),
+        keywords,
+      });
+    }
   }
 
-  const sortedExtensions = extensions.sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  const externalJsonPath = path.join(EXTENSIONS_DIR, "external.json");
+  if (fs.existsSync(externalJsonPath)) {
+    try {
+      const externalExtensions = JSON.parse(
+        fs.readFileSync(externalJsonPath, "utf-8")
+      );
+      if (Array.isArray(externalExtensions)) {
+        for (const ext of externalExtensions) {
+          const name = normalizeText(ext?.name);
+          const installUrl = normalizeText(ext?.installUrl);
+          const sourceUrl = normalizeText(ext?.sourceUrl || installUrl);
+          if (!name || !installUrl) {
+            continue;
+          }
 
-  return { items: sortedExtensions };
+          const id = normalizeText(ext?.id || name.toLowerCase().replace(/\s+/g, "-"));
+          const keywords = Array.isArray(ext?.keywords)
+            ? [...new Set(ext.keywords.filter((keyword) => typeof keyword === "string").map((keyword) => keyword.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+            : Array.isArray(ext?.tags)
+              ? [...new Set(ext.tags.filter((keyword) => typeof keyword === "string").map((keyword) => keyword.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+              : [];
+          const iconScreenshot =
+            normalizeExternalScreenshotRole(ext?.screenshots?.icon, commitSha) ||
+            normalizeExternalScreenshotRole(ext?.iconPath, commitSha) ||
+            normalizeExternalScreenshotRole(ext?.imagePath, commitSha) ||
+            normalizeExternalScreenshotRole(ext?.iconUrl, commitSha) ||
+            normalizeExternalScreenshotRole(ext?.imageUrl, commitSha);
+          const galleryScreenshot =
+            normalizeExternalScreenshotRole(ext?.screenshots?.gallery, commitSha) ||
+            normalizeExternalScreenshotRole(ext?.galleryPath, commitSha) ||
+            normalizeExternalScreenshotRole(ext?.galleryUrl, commitSha) ||
+            iconScreenshot;
+          const screenshots = {
+            icon: iconScreenshot
+              ? {
+                path: iconScreenshot.path,
+                type: iconScreenshot.type,
+              }
+              : null,
+            gallery: galleryScreenshot
+              ? {
+                path: galleryScreenshot.path,
+                type: galleryScreenshot.type,
+              }
+              : null,
+          };
+          const imageUrl = iconScreenshot?.imageUrl || null;
+          const assetPath = iconScreenshot?.path || null;
+          const canvasId = normalizeText(ext?.canvasId, id);
+
+          items.push({
+            id,
+            canvasId,
+            extensionId: id,
+            extensionName: name,
+            pluginName: null,
+            name,
+            version: normalizeText(ext?.version, "1.0.0"),
+            description: normalizeText(ext?.description, "External canvas extension"),
+            path: null,
+            ref: null,
+            lastUpdated: null,
+            screenshots,
+            imageUrl,
+            assetPath,
+            installUrl,
+            installCommand: null,
+            sourceUrl: sourceUrl || null,
+            external: true,
+            author: normalizeAuthor(ext?.author),
+            keywords,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed to parse external extensions: ${e.message}`);
+    }
+  }
+
+  const sortedItems = items.sort((a, b) => a.name.localeCompare(b.name));
+  const keywordFilters = [...new Set(sortedItems.flatMap((item) => item.keywords || []))]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    items: sortedItems,
+    filters: {
+      keywords: keywordFilters,
+    },
+  };
+}
+
+function generateExtensionsData(extensionManifestData) {
+  if (!extensionManifestData || !Array.isArray(extensionManifestData.items)) {
+    return { items: [], filters: { keywords: [] } };
+  }
+
+  const items = extensionManifestData.items.map((item) => ({
+    ...item,
+    keywords: Array.isArray(item.keywords) ? item.keywords : [],
+    screenshots: item.screenshots || { icon: null, gallery: null },
+  }));
+  const filters = {
+    keywords: [...new Set(items.flatMap((item) => item.keywords))]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
+  };
+
+  return { items, filters };
 }
 
 /**
@@ -1039,9 +1692,12 @@ async function main() {
     `✓ Generated ${plugins.length} plugins (${pluginsData.filters.tags.length} tags)`
   );
 
-  const extensionsData = generateExtensionsData(gitDates, commitSha);
+  const extensionManifestData = generateCanvasManifest(gitDates, commitSha);
+  const extensionsData = generateExtensionsData(extensionManifestData);
   const extensions = extensionsData.items;
-  console.log(`✓ Generated ${extensions.length} extensions`);
+  console.log(
+    `✓ Generated ${extensions.length} extensions (${extensionsData.filters.keywords.length} keywords)`
+  );
 
   const toolsData = generateToolsData();
   const tools = toolsData.items;

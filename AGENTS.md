@@ -21,6 +21,7 @@ The Awesome GitHub Copilot repository is a community-driven collection of custom
 ├── hooks/            # Automated workflow hooks (folders with README.md + hooks.json)
 ├── workflows/        # Agentic Workflows (.md files for GitHub Actions automation)
 ├── plugins/          # Installable plugin packages (folders with plugin.json)
+├── extensions/       # Canvas extensions (each with extension.mjs and plugin metadata)
 ├── docs/             # Documentation for different resource types
 ├── eng/              # Build and automation scripts
 └── scripts/          # Utility scripts
@@ -80,6 +81,19 @@ All agent files (`*.agent.md`) and instruction files (`*.instructions.md`) must 
 - Bundled assets should be referenced in the SKILL.md instructions
 - Asset files should be reasonably sized (under 5MB per file)
 - Skills follow the [Agent Skills specification](https://agentskills.io/specification)
+
+#### Canvas Extensions (extensions/\*)
+
+- Each extension folder must include `extension.mjs`
+- Extension metadata must live at `.github/plugin/plugin.json`
+- Extension `plugin.json` **must** follow the convention:
+  - `name`, `description`, `version` are required
+  - `logo` **must** be exactly `"assets/preview.png"` (enforced convention)
+  - `extensions` **must** be exactly `"."` (per [copilot-agent-runtime#9929](https://github.com/github/copilot-agent-runtime/pull/9929))
+  - Optional: `author`, `keywords` fields
+  - **Must not** include `x-awesome-copilot` field (use convention-based `assets/preview.png` only)
+- Each extension must have `assets/preview.png` as the primary visual asset
+- Do not add `canvas.json`; website metadata is sourced from `.github/plugin/plugin.json`
 
 #### Hook Folders (hooks/\*/README.md)
 
@@ -160,6 +174,14 @@ When adding a new agent, instruction, skill, hook, workflow, or plugin:
 5. Run `npm run build` to update README.md and marketplace.json
 6. Verify the plugin appears in `.github/plugin/marketplace.json`
 
+**For Canvas Extensions:**
+
+1. Create/update the extension in `extensions/<extension-id>/` with `extension.mjs`
+2. Add `.github/plugin/plugin.json` metadata (required: `name`, `description`, `version`, `logo: "assets/preview.png"`, `extensions: "."`; optional: `author`, `keywords`)
+3. Ensure `assets/preview.png` exists as the primary visual asset
+4. Run `npm run plugin:validate` to validate plugin and extension metadata
+5. Run `npm run build` to regenerate website data and marketplace output
+
 **For External Plugins:**
 
 1. Do not open a direct PR that edits `plugins/external.json` for a public third-party plugin submission
@@ -170,9 +192,9 @@ When adding a new agent, instruction, skill, hook, workflow, or plugin:
 6. After issue edits, the issue author or a maintainer can comment `/rerun-intake` to re-run automated intake and quality gates without opening a new submission issue
 7. Maintainers can explicitly override a quality-gate blocker with `/mark-ready-for-review [optional reason]`, which moves the issue to `ready-for-review`
 8. Maintainers make the decision with `/approve` or `/reject <reason>` issue comments once the issue is in `ready-for-review`; approved issues are closed and used as the six-month re-review anchor
-9. Approval automation creates or updates the PR against `staged`, updates `plugins/external.json`, and regenerates marketplace outputs
+9. Approval automation creates or updates the PR against `main`, updates `plugins/external.json`, and regenerates marketplace outputs
 10. Nightly re-review automation finds closed `external-plugin` + `approved` issues that are at least six months old, applies `re-review-due`, and opens or updates a tracking issue for maintainers
-11. Maintainers complete re-review on the original approved submission issue with `/re-review-keep`, `/re-review-needs-changes`, or `/re-review-remove`; keep resets the issue `closed_at`, and remove opens a PR against `staged`
+11. Maintainers complete re-review on the original approved submission issue with `/re-review-keep`, `/re-review-needs-changes`, or `/re-review-remove`; keep resets the issue `closed_at`, and remove opens a PR against `main`
 
 ### Testing Instructions
 
@@ -215,7 +237,7 @@ Before committing:
 
 When creating a pull request:
 
-> **Important:** All pull requests should target the **`staged`** branch, not `main`.
+> **Important:** All pull requests should target the **`main`** branch, not `staged`.
 
 1. **README updates**: New files should automatically be added to the README when you run `npm run build`
 2. **Front matter validation**: Ensure all markdown files have the required front matter fields
