@@ -585,6 +585,31 @@
     }
   },
   {
+    "name": "keep-the-why",
+    "description": "Preserves or recovers the reasoning behind a codebase — architectural decisions, rejected alternatives, workarounds, incident learnings, operational constraints, and historical context the code itself cannot explain.",
+    "version": "0.5.2",
+    "author": {
+      "name": "Oliver Zehentleitner",
+      "url": "https://github.com/oliver-zehentleitner"
+    },
+    "repository": "https://github.com/oliver-zehentleitner/keep-the-why",
+    "homepage": "https://keepthewhy.com",
+    "license": "MIT",
+    "keywords": [
+      "documentation",
+      "context",
+      "decision-log",
+      "knowledge-management",
+      "onboarding",
+      "agents"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "oliver-zehentleitner/keep-the-why",
+      "ref": "v0.5.2"
+    }
+  },
+  {
     "name": "microsoft-docs",
     "description": "Access official Microsoft documentation, API references, and code samples for Azure, .NET, Windows, and more.",
     "version": "1.0.0",
@@ -739,7 +764,7 @@
   {
     "name": "modernize-java",
     "description": "GitHub Copilot modernization – Java Upgrade CLI Plugin helps you upgrade Java applications from the command line. It brings intelligent modernization capabilities to your terminal and CI/CD pipelines: analyze your project and generate an upgrade plan, automatically transform your codebase, fix build issues, validate against known CVEs, and output a detailed summary of file changes and updated dependencies.",
-    "version": "1.22.0",
+    "version": "1.23.0",
     "author": {
       "name": "microsoft",
       "url": "https://github.com/microsoft/modernize-java"
@@ -757,8 +782,31 @@
       "source": "github",
       "repo": "microsoft/modernize-java",
       "path": "plugins/modernize-java",
-      "ref": "1.22.0",
-      "sha": "ef5367b446566bdc90960deeb40def63f9e7024e"
+      "ref": "1.23.0",
+      "sha": "5ccc2ad4011314602e1b80f0b818c95bcf198f67"
+    }
+  },
+  {
+    "name": "msgraph-developer-skills",
+    "description": "Builds and modernizes Microsoft Graph applications with minimal, purpose-built API clients. The plugin identifies the required Microsoft Graph endpoints and their least-privileged permissions, generates a focused client with [Kiota](https://aka.ms/kiota) or an AI-assisted workflow, and applies recommended authentication and SDK patterns.",
+    "version": "1.0.0",
+    "author": {
+      "name": "Sergio Lopez"
+    },
+    "repository": "https://github.com/microsoftgraph/dev-skills",
+    "license": "MIT",
+    "keywords": [
+      "microsoft-graph",
+      "graph-api",
+      "sdk-generation",
+      "kiota",
+      "api-client",
+      "copilot-skills"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "microsoftgraph/dev-skills",
+      "sha": "175381470b0d7e09da89be0608017d208e79933a"
     }
   },
   {
@@ -846,7 +894,7 @@
   {
     "name": "sonarqube",
     "description": "SonarQube is the AI code quality and security verification platform used by millions of developers to catch bugs, vulnerabilities, and leaked secrets. This plugin enforces those standards in the coding loop: 7,500+ distinct issue types, secrets scanning, agentic analysis, and quality gates across 40+ languages.",
-    "version": "2.3.0",
+    "version": "2.5.0",
     "author": {
       "name": "Sonar",
       "url": "https://sonarsource.com/"
@@ -864,7 +912,31 @@
     "source": {
       "source": "github",
       "repo": "SonarSource/sonarqube-agent-plugins",
-      "ref": "2.3.0"
+      "ref": "2.5.0"
+    }
+  },
+  {
+    "name": "stripe",
+    "description": "Accept payments and grow your business. Stripe's agent plugin includes best practices, upgrade guidance, and our MCP server.",
+    "version": "0.1.2",
+    "author": {
+      "name": "Stripe",
+      "url": "https://stripe.com"
+    },
+    "repository": "https://github.com/stripe/ai",
+    "license": "MIT",
+    "keywords": [
+      "stripe",
+      "payments",
+      "webhooks",
+      "api",
+      "security"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "stripe/ai",
+      "path": "providers/agent-plugins/plugin",
+      "sha": "e8f9aee6f9a34a633243e632e650401a76c36c41"
     }
   },
   {
@@ -1003,7 +1075,7 @@
   {
     "name": "upgrade-agent",
     "description": "AI-powered upgrade assistant for upgrading and migrating applications. Helps modernize legacy code and upgrade .NET applications to current frameworks.",
-    "version": "1.1.290",
+    "version": "1.1.441",
     "author": {
       "name": "Microsoft",
       "url": "https://www.microsoft.com"
@@ -1022,7 +1094,8 @@
       "source": "github",
       "repo": "microsoft/upgrade-agent-plugins",
       "path": "plugins/upgrade-agent",
-      "sha": "559f6fea2deea78fb5adf2cfacba2a5151a5fa7f"
+      "ref": "v1.1.441",
+      "sha": "f8abab778cfb5b57a3c745d540631b7aab15d5b3"
     }
   },
   {
