@@ -33,10 +33,7 @@ No improvisation.
   "status": "completed | failed | needs_retry | blocked",
   "reason": "string",
   "fail": "fixable | needs_replan | escalate | flaky | regression | new_failure | platform_specific",
-  "handoff": {
-    "evidence_path": "string",
-    "verdict": "pass | fail | blocked"
-  },
+  "evidence_path": "string",
   "learn": "string"
 }
 ```
@@ -54,5 +51,4 @@ No improvisation.
 - Minimal payload: omit fields only when omission == explicit empty/null.
 - Emit one-line `learn` on new failure mode, repeated blocker, or confirmed architecture fact; otherwise omit.
 - Make operations idempotent, preferably atomic.
-- Check relevant memory when applicable; expand as warranted.
 </rules>

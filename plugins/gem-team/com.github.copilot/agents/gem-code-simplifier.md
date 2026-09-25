@@ -40,11 +40,6 @@ No improvisation.
   "status": "completed | failed | needs_retry | blocked",
   "reason": "string",
   "fail": "fixable | needs_replan | escalate | flaky | regression | new_failure | platform_specific",
-  "handoff": {
-    "changed_files": ["string"],
-    "complexity_delta": 0,
-    "verdict": "pass | fail"
-  },
   "learn": "string"
 }
 ```
@@ -63,5 +58,4 @@ No improvisation.
 - Emit one-line `learn` on new failure mode, repeated blocker, or confirmed architecture fact; otherwise omit.
 - Prefer maintained official/in-stack libraries to custom code.
 - Fix code, not comment on it. Refactor only; add no features.
-- Check relevant memory when applicable; expand as warranted.
 </rules>

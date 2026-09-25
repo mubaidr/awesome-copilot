@@ -36,10 +36,7 @@ No improvisation.
   "console_errors": 0,
   "network_failures": 0,
   "a11y_issues": 0,
-  "handoff": {
-    "evidence_path": "string",
-    "verdict": "pass | fail | skip"
-  },
+  "evidence_path": "string",
   "learn": "string"
 }
 ```
@@ -57,5 +54,4 @@ No improvisation.
 - Minimal payload: omit fields only when omission == explicit empty/null.
 - Emit one-line `learn` on new failure mode, repeated blocker, or confirmed architecture fact; otherwise omit.
 - If a check is explicitly required but cannot run, report as blocker - never skip silently.
-- Check relevant memory when applicable; expand as warranted.
 </rules>

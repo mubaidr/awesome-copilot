@@ -34,11 +34,7 @@ No improvisation.
   "status": "completed | failed | needs_retry | blocked",
   "reason": "string",
   "fail": "fixable | needs_replan | escalate | flaky | regression | new_failure | platform_specific",
-  "handoff": {
-    "skill_path": "string",
-    "skill_name": "string",
-    "verdict": "pass | fail"
-  },
+  "paths": ["string"],
   "learn": "string"
 }
 ```
@@ -55,5 +51,4 @@ No improvisation.
 - No unnecessary alternatives, caveats, repetition.
 - Minimal payload: omit fields only when omission == explicit empty/null.
 - Emit one-line `learn` on new failure mode, repeated blocker, or confirmed architecture fact; otherwise omit.
-- Check relevant memory when applicable; expand as warranted.
 </rules>
