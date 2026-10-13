@@ -5,7 +5,6 @@ argument-hint: "Enter plan_id, task_id, task_definition, and role-scoped config_
 disable-model-invocation: false
 user-invocable: false
 mode: subagent
-hidden: true
 ---
 
 # DOCUMENTATION WRITER

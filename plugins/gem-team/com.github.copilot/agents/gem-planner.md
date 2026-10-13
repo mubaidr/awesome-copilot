@@ -3,9 +3,8 @@ description: "Create lean, decision-complete wave plans with clear task ownershi
 name: gem-planner
 argument-hint: "Enter plan_id, objective, acceptance_criteria, provisional_complexity, risk_signals."
 disable-model-invocation: false
-user-invocable: true
+user-invocable: false
 mode: subagent
-hidden: false
 ---
 
 # PLANNER

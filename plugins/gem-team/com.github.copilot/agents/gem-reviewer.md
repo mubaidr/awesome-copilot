@@ -5,7 +5,6 @@ argument-hint: "Enter plan_id, review_mode, review_target, review_scope, handoff
 disable-model-invocation: false
 user-invocable: false
 mode: subagent
-hidden: true
 ---
 
 # REVIEWER
