@@ -209,6 +209,11 @@ export function PluginDetail({
         { label: item.name },
       ]}
       install={install}
+      compactInstall={
+        <Button as="a" href={appInstallUrl} variant="primary" size="small" hasArrow={false} leadingVisual={PlusIcon}>
+          Install
+        </Button>
+      }
       heroExtras={heroExtras}
       sidebar={
         <ResourceMeta
@@ -327,8 +332,9 @@ export function PluginDetail({
       ) : (
         <section className={styles.articleSection}>
           <Text as="p" variant="muted">
-            This plugin does not ship a README in this repository.
-            {item.external ? " Documentation lives in its source repo." : ""}
+            {item.external
+              ? "A README could not be loaded. Documentation lives in its source repo."
+              : "This plugin does not ship a README in this repository."}
           </Text>
         </section>
       )}

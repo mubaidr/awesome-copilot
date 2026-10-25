@@ -3,7 +3,8 @@ import path from "node:path";
 import { marked } from "marked";
 import matter from "gray-matter";
 import { enhanceMarkdownA11y } from "./markdown-a11y";
-import { sanitizeHtml } from "./sanitize-html";
+import { sanitizeHtml, type MarkdownSource } from "./sanitize-html";
+import type { MarkdownImageSource } from "./markdown-images";
 
 /**
  * Build-time helpers shared by the resource detail pages
@@ -89,11 +90,36 @@ function stripLeadingH1(html: string): string {
   return html.replace(/^\s*<h1\b[^>]*>[\s\S]*?<\/h1>\s*/, "");
 }
 
+export function renderResourceMarkdown(
+  raw: string,
+  source?: MarkdownSource,
+): { markdownHtml: string; frontmatterText: string; rawMarkdown: string } {
+  const rejectJavaScript = () => {
+    throw new Error("JavaScript frontmatter is not supported");
+  };
+  const parsed = matter(raw, {
+    engines: { js: rejectJavaScript, javascript: rejectJavaScript },
+  });
+  const sanitizedHtml = sanitizeHtml(
+    marked.parse(parsed.content, { async: false }) as string,
+    source,
+  );
+  const accessibleHtml = enhanceMarkdownA11y(stripLeadingH1(sanitizedHtml));
+  return {
+    markdownHtml: sanitizeHtml(accessibleHtml, source),
+    frontmatterText: parsed.matter?.trim() ?? "",
+    rawMarkdown: raw,
+  };
+}
+
 /**
  * Read a resource's markdown file at build time and return its rendered HTML,
  * trimmed frontmatter block, and the raw file contents.
  */
-export function readResourceMarkdown(filePath: string): {
+export function readResourceMarkdown(
+  filePath: string,
+  imageSource: MarkdownImageSource | null = { rawBase: RAW_BASE, filePath },
+): {
   markdownHtml: string;
   frontmatterText: string;
   rawMarkdown: string;
@@ -104,13 +130,7 @@ export function readResourceMarkdown(filePath: string): {
   try {
     const raw = fs.readFileSync(path.join(repoRoot, filePath), "utf-8");
     rawMarkdown = raw;
-    const parsed = matter(raw);
-    frontmatterText = parsed.matter?.trim() ?? "";
-    markdownHtml = enhanceMarkdownA11y(
-      stripLeadingH1(
-        sanitizeHtml(marked.parse(parsed.content, { async: false }) as string)
-      )
-    );
+    ({ markdownHtml, frontmatterText, rawMarkdown } = renderResourceMarkdown(raw, imageSource));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(

@@ -6,6 +6,7 @@ import { Box, Breadcrumbs, Heading, Section, Text } from "@primer/react-brand";
 
 import { PageShell } from "./PageShell";
 import { LargeFooter } from "./LargeFooter";
+import { ReadingHeader } from "./ReadingHeader";
 import type { AwesomeCopilotPage } from "./navigation";
 import { getScrollBehavior } from "./scrollBehavior";
 import type { SearchItem } from "./searchIndex";
@@ -13,15 +14,18 @@ import styles from "./styles/dotnet-upgrade.module.css";
 import {
   useAgentDetailHeroPin,
   useAgentDetailProgress,
+  useReadingScrollSpy,
 } from "./useAgentDetailScroll";
+import type { DetailTocItem } from "../../lib/detail-toc";
+
+export { buildDetailToc } from "../../lib/detail-toc";
+export type { DetailTocItem } from "../../lib/detail-toc";
 
 export type DetailCrumb = {
   label: string;
   /** Omitted for the trailing (current) crumb. */
   href?: string;
 };
-
-export type DetailTocItem = { id: string; label: string };
 
 export type DetailSibling = { label: string; href: string };
 
@@ -34,6 +38,8 @@ export type DetailChassisProps = {
   breadcrumbs: DetailCrumb[];
   /** Hero action row: install split-button, source/download buttons, etc. */
   install?: React.ReactNode;
+  /** The primary install action, sized for the compact reading header. */
+  compactInstall?: React.ReactNode;
   /** Extra hero content rendered under the description (e.g. `applyTo` tokens). */
   heroExtras?: React.ReactNode;
   /** "In this article" entries; ids must exist in the content region. */
@@ -50,13 +56,11 @@ export type DetailChassisProps = {
   children: React.ReactNode;
 };
 
-const TWO_COLUMN_QUERY = "(min-width: 75rem)";
-
 /**
  * Shared shell for every resource detail route.
  *
- * Reproduces the designers' `agent.tsx` layout: breadcrumbs and a sticky hero
- * carrying a reading-progress rule, a two-column body whose sidebar holds the
+ * Breadcrumbs and an expanded hero scroll into a compact reading title with a
+ * progress rule, above a two-column body whose sidebar holds the
  * in-page table of contents, sibling navigation, and a back-to-top control —
  * all inside the site-wide `PageShell` chrome.
  *
@@ -69,6 +73,7 @@ export function DetailChassis({
   description,
   breadcrumbs,
   install,
+  compactInstall,
   heroExtras,
   toc = [],
   sidebar,
@@ -84,22 +89,31 @@ export function DetailChassis({
   const [heroBurst, setHeroBurst] = React.useState(false);
   const [activeSection, setActiveSection] = React.useState(toc[0]?.id ?? "");
 
-  const lastSectionId = toc[toc.length - 1]?.id ?? "";
-
-  useAgentDetailHeroPin(contentScrollRef, {
+  const pinnedHeight = useAgentDetailHeroPin(contentScrollRef, {
     hero: styles.hero,
     heroInner: styles.heroInner,
-    heroContent: styles.heroContent,
   });
   const scrollToTop = useAgentDetailProgress(
     contentScrollRef,
-    lastSectionId,
     setShowBackToTop,
     setHeroBurst,
   );
 
   useScrollHostLayout(contentScrollRef);
-  useScrollSpy(contentScrollRef, toc, setActiveSection);
+  useReadingScrollSpy(contentScrollRef, toc, pinnedHeight, setActiveSection);
+
+  const progressRider = (
+    <div className={styles.progressViewport} aria-hidden="true">
+      <div className={styles.progressRider} data-burst={heroBurst ? "true" : undefined}>
+        <span className={styles.progressDuck} />
+        <span className={styles.confetti}>
+          {Array.from({ length: 14 }).map((_, i) => (
+            <i key={i} className={styles.confettiPiece} />
+          ))}
+        </span>
+      </div>
+    </div>
+  );
 
   return (
     <PageShell
@@ -110,7 +124,10 @@ export function DetailChassis({
       renderFooter={false}
     >
       <div className={styles.scrollHost} ref={contentScrollRef}>
-        <Box as="section" className={styles.hero}>
+        <ReadingHeader title={title} className={styles.readingHeader} action={compactInstall}>
+          {progressRider}
+        </ReadingHeader>
+        <Box as="section" className={clsx(styles.hero, "heading-texture")}>
           <Section paddingBlockStart="none" paddingBlockEnd="none">
             <div className={styles.heroInner}>
               <div className={styles.heroBreadcrumbs}>
@@ -154,30 +171,18 @@ export function DetailChassis({
                 ) : null}
                 {heroExtras}
                 {install ? (
-                  <div className={styles.heroActions}>{install}</div>
+                  <div className={styles.heroActions} data-hero-actions>{install}</div>
                 ) : null}
               </div>
             </div>
           </Section>
-          <div
-            className={styles.progressRider}
-            data-burst={heroBurst ? "true" : undefined}
-            aria-hidden="true"
-          >
-            <span className={styles.progressDuck} />
-            <span className={styles.confetti}>
-              {Array.from({ length: 14 }).map((_, i) => (
-                <i key={i} className={styles.confettiPiece} />
-              ))}
-            </span>
-          </div>
+          {progressRider}
         </Box>
-
         <Box as="section" className={styles.body}>
           <Section paddingBlockStart="none" paddingBlockEnd="none">
             <div className={styles.bodyInner}>
               <div className={styles.layout}>
-                <article className={styles.contentCol}>{children}</article>
+                <article className={styles.contentCol} data-reading-content>{children}</article>
 
                 <aside className={styles.sidebarCol}>
                   <div className={styles.sidebarSticky}>
@@ -326,139 +331,4 @@ function useScrollHostLayout(
     });
     return () => observer.disconnect();
   }, [contentScrollRef]);
-}
-
-/** Highlight the section the reader is currently in, below the pinned hero. */
-function useScrollSpy(
-  contentScrollRef: React.RefObject<HTMLDivElement | null>,
-  toc: DetailTocItem[],
-  setActiveSection: React.Dispatch<React.SetStateAction<string>>,
-) {
-  React.useEffect(() => {
-    if (toc.length === 0) return;
-    const scroller = contentScrollRef.current;
-    if (!scroller) return;
-
-    let observer: IntersectionObserver | null = null;
-    const build = () => {
-      observer?.disconnect();
-      const internal = window.matchMedia(TWO_COLUMN_QUERY).matches;
-      const root = internal ? scroller : null;
-      const viewport = internal ? scroller.clientHeight : window.innerHeight;
-      const hero = scroller.querySelector<HTMLElement>(`.${styles.hero}`);
-      const pinned = internal && hero ? hero.getBoundingClientRect().height : 0;
-      const bottomMargin = Math.round(Math.max(0, viewport - pinned) * 0.65);
-
-      observer = new IntersectionObserver(
-        (entries) => {
-          const visible = entries
-            .filter((entry) => entry.isIntersecting)
-            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-          if (visible[0]) setActiveSection(visible[0].target.id);
-        },
-        {
-          root,
-          rootMargin: `-${Math.round(pinned)}px 0px -${bottomMargin}px 0px`,
-          threshold: 0,
-        },
-      );
-      toc.forEach((section) => {
-        const el = document.getElementById(section.id);
-        if (el) observer?.observe(el);
-      });
-    };
-
-    build();
-    window.addEventListener("resize", build);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", build);
-    };
-  }, [contentScrollRef, toc, setActiveSection]);
-}
-
-const slugify = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/&[a-z]+;|&#\d+;/g, " ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-const stripHtmlTags = (html: string) => {
-  let text = "";
-  let inTag = false;
-  let quote: '"' | "'" | undefined;
-
-  for (const character of html) {
-    if (inTag) {
-      if (quote) {
-        if (character === quote) quote = undefined;
-      } else if (character === '"' || character === "'") {
-        quote = character;
-      } else if (character === ">") {
-        inTag = false;
-      }
-    } else if (character === "<") {
-      inTag = true;
-    } else {
-      text += character;
-    }
-  }
-
-  return text;
-};
-
-/**
- * Derive the in-page table of contents from rendered markdown, stamping a
- * stable `id` onto every `<h2>` so the TOC links and scroll-spy have anchors.
- *
- * Pure and deterministic, so the ids match between the build-time render and
- * client hydration.
- */
-export function buildDetailToc(markdownHtml: string): {
-  html: string;
-  toc: DetailTocItem[];
-} {
-  if (!markdownHtml) return { html: markdownHtml, toc: [] };
-
-  const toc: DetailTocItem[] = [];
-  const used = new Map<string, number>();
-
-  const html = markdownHtml.replace(
-    /<h2([^>]*)>([\s\S]*?)<\/h2>/g,
-    (match, attrs: string, inner: string) => {
-      const label = stripHtmlTags(inner)
-        .replace(/&lt;|&gt;|&quot;|&#39;|&amp;/g, (entity) => {
-          switch (entity) {
-            case "&lt;":
-              return "<";
-            case "&gt;":
-              return ">";
-            case "&quot;":
-              return '"';
-            case "&#39;":
-              return "'";
-            default:
-              return "&";
-          }
-        })
-        .trim();
-      if (!label) return match;
-
-      const existing = /\bid="([^"]+)"/.exec(attrs)?.[1];
-      let id = existing ?? slugify(label);
-      if (!id) return match;
-      if (!existing) {
-        const seen = used.get(id) ?? 0;
-        used.set(id, seen + 1);
-        if (seen > 0) id = `${id}-${seen}`;
-      }
-
-      toc.push({ id, label });
-      const nextAttrs = existing ? attrs : ` id="${id}"${attrs}`;
-      return `<h2${nextAttrs}>${inner}</h2>`;
-    },
-  );
-
-  return { html, toc };
 }
