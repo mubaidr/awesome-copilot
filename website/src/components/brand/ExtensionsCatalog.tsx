@@ -25,6 +25,12 @@ import {
 import { ExtensionsIcon } from "./ExtensionsIcon";
 import { PageShell } from "./PageShell";
 import { CatalogSortControl, CATALOG_SORT_OPTIONS } from "./CatalogSortControl";
+import {
+  CatalogResourceSizeControl,
+  CATALOG_RESOURCE_SIZE_OPTIONS,
+  DEFAULT_CATALOG_RESOURCE_SIZE,
+  type CatalogResourceSize,
+} from "./CatalogResourceSizeControl";
 import { TypingText } from "./TypingText";
 import { httpUrl } from "./resourceActions";
 import {
@@ -37,6 +43,7 @@ import { pageHref } from "./pageHref";
 import type { SearchItem } from "./searchIndex";
 import styles from "./styles/extensions.module.css";
 import { useCatalogPageFocus } from "./useCatalogPageFocus";
+import { buildVSCodePluginInstallUrl } from "../../lib/plugin-install";
 
 const CONTRIBUTE_URL =
   "https://github.com/github/awesome-copilot/blob/main/CONTRIBUTING.md#adding-canvas-extensions";
@@ -83,8 +90,6 @@ const FILTER_COLLAPSE_LIMIT = 10;
 type FilterState = Record<FilterGroupId, string[]>;
 
 const emptyFilters: FilterState = { author: [], updated: [], keyword: [] };
-
-const PAGE_SIZE = 6;
 
 type SortMode = "az" | "newest";
 
@@ -148,6 +153,9 @@ export function ExtensionsCatalog({
 }) {
   const { colorMode } = useTheme();
   const [sortMode, setSortMode] = useState<SortMode>("az");
+  const [pageSize, setPageSize] = useState<CatalogResourceSize>(
+    DEFAULT_CATALOG_RESOURCE_SIZE,
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const focusCatalogPage = useCatalogPageFocus();
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
@@ -234,11 +242,11 @@ export function ExtensionsCatalog({
   const activeFilterCount =
     filters.author.length + filters.updated.length + filters.keyword.length;
   const hasActiveFilters = activeFilterCount > 0;
-  const pageCount = Math.max(1, Math.ceil(sortedExtensions.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(sortedExtensions.length / pageSize));
   const page = Math.min(currentPage, pageCount);
   const visibleExtensions = sortedExtensions.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
+    (page - 1) * pageSize,
+    page * pageSize,
   );
 
   return (
@@ -363,6 +371,17 @@ export function ExtensionsCatalog({
                   setCurrentPage(1);
                 }}
               />
+              <div className={styles.toolbarDivider} aria-hidden="true" />
+              <CatalogResourceSizeControl
+                ariaLabel="Extensions per page"
+                value={pageSize}
+                options={CATALOG_RESOURCE_SIZE_OPTIONS}
+                styles={styles}
+                onChange={(value) => {
+                  setPageSize(value);
+                  setCurrentPage(1);
+                }}
+              />
             </Box>
             <Box className={styles.gridFrame} data-mode={colorMode}>
               <Box className={styles.gridContent}>
@@ -376,6 +395,9 @@ export function ExtensionsCatalog({
                     const detailHref = pageHref(`extension/${ext.id}`);
                     const sourceUrl = extensionSourceUrl(ext);
                     const installUrl = appInstallUrl(ext);
+                    const vscodeInstallUrl = ext.pluginName
+                      ? buildVSCodePluginInstallUrl(ext.pluginName)
+                      : null;
                     const safeImageUrl = httpUrl(ext.imageUrl);
                     return (
                       <Grid.Column
@@ -425,6 +447,17 @@ export function ExtensionsCatalog({
                                 hasArrow={false}
                               >
                                 Open in Copilot app
+                              </Button>
+                            ) : null}
+                            {vscodeInstallUrl ? (
+                              <Button
+                                as="a"
+                                href={vscodeInstallUrl}
+                                variant="secondary"
+                                hasArrow={false}
+                                aria-label={`Install in VS Code: ${ext.name}`}
+                              >
+                                Install in VS Code
                               </Button>
                             ) : null}
                             {ext.installCommand ? (
@@ -483,6 +516,7 @@ export function ExtensionsCatalog({
             currentPage={page}
             onPageChange={(e, n) => {
               e.preventDefault();
+              if (n === page) return;
               setCurrentPage(n);
               focusCatalogPage();
             }}

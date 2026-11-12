@@ -12,6 +12,15 @@ npm run website:dev     # generate data + start the dev server
 npm run website:build   # full production build
 ```
 
+Agent metadata generation accepts `tools` as either a YAML string array or a
+comma-separated string, including MCP wildcards such as `new-relic-mcp-server/*`.
+Both forms produce arrays in the generated metadata and tool filter facets.
+Run the focused metadata regression tests from the repository root:
+
+```bash
+node --test .github/scripts/catalog/generate-website-data.test.mjs
+```
+
 ## Accessibility
 
 The website has an automated axe-core + Playwright audit. Run it locally with `npm run website:a11y` from the repository root, or run `npm run a11y` from `website/` after building `dist` first.
@@ -92,10 +101,41 @@ content aligned to the wordmark and a scrollable panel on short screens.
 The mobile navigation regression checks menu bounds, padding, icon consistency,
 and keyboard behavior.
 
+## Plugin install links
+
+Plugins and marketplace-backed canvas extensions offer **Install in VS Code**
+on their catalog cards and detail pages, alongside existing install options.
+The link opens VS Code's confirmation flow; it does not report installation
+success in the browser. It requires a VS Code build with the `chat-plugin`
+handler, plugins enabled, and Copilot on the Agent Host.
+
+`src/lib/plugin-install.ts` builds links with `URLSearchParams`, for example
+`vscode://chat-plugin/install?source=github%2Fawesome-copilot&plugin=ai-ready`.
+The source is the marketplace repository even for curated external plugins.
+Plugin records use their manifest name; canvas records use their owning
+`pluginName`, never the canvas ID. External canvases without a marketplace
+plugin keep source-only actions. Source and README URLs retain their HTTP(S)
+sanitization.
+
+The dependency-free URI tests run in the website preview CI build. Run them
+locally, then check representative catalog and detail links against a built preview:
+
+```bash
+node --test website/scripts/plugin-install.test.mjs
+npm run website:build
+node website/scripts/plugin-install-regression.mjs
+```
+
+The browser regression covers local and external plugins, canvas owner mapping,
+and source-only eligibility. It uses `SITE_BASE_URL` as described above and does
+not launch the application or install plugins.
+
 ## Reading headers and catalog pagination
 
 Resource details and learning articles let their expanded title, description,
-and actions scroll away. On roomy desktop viewports, an observer reveals a
+and actions scroll away. Resource detail descriptions are shown in full, while
+catalog card descriptions remain capped at three lines.
+On roomy desktop viewports, an observer reveals a
 compact title with a small, right-aligned primary install action where available.
 Its right edge aligns with the top bar's trailing actions.
 The compact title is a visual duplicate hidden from assistive technology; the

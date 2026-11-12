@@ -1,12 +1,13 @@
 const TOKEN = document.querySelector('meta[name="board-token"]')?.content ?? "";
 const CONFIRM_MS = 6000;
+const APPROVAL_COMMENT_TEMPLATE = "Thanks for contributing to Awesome Copilot! We appreciate the time and effort you've put into this contribution.";
 
 const COLUMN_HINTS = {
     unreviewed: "Not reviewed yet",
     reviewing: "Waiting on the agent",
     close: "Doesn't belong here",
-    "request-changes": "Fixable, needs work",
-    "needs-insight": "Needs a maintainer call",
+    "probably-reject": "Likely not a fit; inspect before investing in another full review",
+    "needs-attention": "Author fixes or a maintainer decision; check the recommendation on each card",
     approve: "Ready to merge",
     actioned: "GitHub action completed",
 };
@@ -26,16 +27,19 @@ const DECISION_BUTTONS = {
 };
 
 const CONFIRM_LABELS = {
-    approve: "Confirm: approve + merge",
+    approve: "Confirm: approve + run workflows + merge",
     "request-changes": "Confirm: request changes",
     comment: "Confirm: submit feedback",
     close: "Confirm: close PR",
 };
+const PARKED_RECOMMENDATIONS = new Set(["close", "probably-reject", "needs-insight"]);
 
 let board = null;
 let selectedNumber = null;
 let detail = null;
 let detailError = null;
+let detailErrorHandoff = true;
+let previewHeadRefOid = null;
 let activeTab = "review";
 let filterText = "";
 let pendingConfirm = null;
@@ -69,6 +73,8 @@ const el = {
     rereviewStart: document.getElementById("rereview-start"),
     rereviewCancel: document.getElementById("rereview-cancel"),
     comment: document.getElementById("decision-comment"),
+    commentSuggestion: document.getElementById("approval-comment-suggestion"),
+    addSuggestedComment: document.getElementById("add-suggested-comment"),
     toasts: document.getElementById("toasts"),
 };
 
@@ -119,10 +125,10 @@ function relativeTime(iso) {
     return new Date(iso).toLocaleDateString();
 }
 
-function toast(message, { error = false, url } = {}) {
+function toast(message, { error = false, handoff = error, url } = {}) {
     const node = h(
         "div",
-        { class: error ? "toast error" : "toast" },
+        { class: error ? "toast error" : "toast", ...(handoff ? { "data-agent-error": "" } : {}) },
         message,
         url ? " " : null,
         url ? h("a", { href: url, target: "_blank", rel: "noreferrer noopener" }, "View") : null,
@@ -141,7 +147,8 @@ async function api(path, { method = "GET", body } = {}) {
         body: body ? JSON.stringify(body) : undefined,
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    if (!response.ok) throw Object.assign(new Error(data.error || `Request failed (${response.status})`),
+        { handoff: data.handoff !== false });
     return data;
 }
 
@@ -156,7 +163,7 @@ async function run(button, work, successMessage) {
         if (successMessage) toast(typeof successMessage === "function" ? successMessage(result) : successMessage);
         return result;
     } catch (error) {
-        toast(error.message, { error: true });
+        toast(error.message, { error: true, handoff: error.handoff !== false });
         return null;
     } finally {
         if (button) {
@@ -212,9 +219,13 @@ function statusPills(item) {
     if (item.isDraft) add("draft", "info");
     if (item.checkCounts?.total) {
         if (item.checksState === "failure") add(`${item.checkCounts.failure} failing`, "danger", "Failing checks");
-        else if (item.checksState === "pending") add(`${item.checkCounts.pending} running`, "caution", "Checks running");
-        else add("checks pass", "success", "All checks passed");
+        if (item.checkCounts.actionRequired) add(`${item.checkCounts.actionRequired} need attention`, "caution", "Check action required; not necessarily workflow execution approval");
+        if (item.checkCounts.pending) add(`${item.checkCounts.pending} pending`, "caution", "Checks queued or running");
+        if (item.checksState === "success" && !item.workflowApprovals?.length && !item.workflowApprovalError)
+            add("checks pass", "success", "All checks passed");
     }
+    if (item.workflowApprovals?.length) add(`${item.workflowApprovals.length} awaiting workflow approval`, "caution", "Open Checks to authorize workflow execution");
+    if (item.workflowApprovalError) add("workflow approvals unavailable", "caution", item.workflowApprovalError);
     if (item.mergeStateStatus === "DIRTY") add("conflicts", "danger", "Merge conflicts with the base branch");
     if (item.reviewDecision === "APPROVED") add("approved", "success", "Approved on GitHub");
     if (item.reviewDecision === "CHANGES_REQUESTED") add("changes requested", "warn", "Changes requested on GitHub");
@@ -222,9 +233,9 @@ function statusPills(item) {
     if (item.reviewStatus === "queued") add("review queued", "ai", "Waiting on the agent's review");
     else if (item.review) {
         add(`AI: ${item.review.recommendation}`, "ai", item.review.rationale || "AI recommendation");
-        if (item.reviewStale) add("PR changed", "caution", "The PR was updated after this review was recorded");
+        if (item.reviewStale) add("PR changed", "caution", "The PR head commit changed after this review was recorded");
     }
-    if (item.manualColumn) add("moved", "info", "Manually moved; overrides the AI recommendation");
+    if (item.manualColumn) add(`Manual: ${item.manualColumn}`, "info", "Manually moved; overrides the AI recommendation");
     if (item.decision)
         add(
             item.decision.status || DECISION_LABELS[item.decision.kind] || item.decision.kind,
@@ -255,6 +266,7 @@ function renderCard(item) {
             },
             ondragstart: (event) => {
                 event.dataTransfer.setData("text/plain", String(item.number));
+                event.dataTransfer.setData("application/x-pr-head", item.headRefOid ?? "");
                 event.dataTransfer.effectAllowed = "move";
                 card.classList.add("dragging");
             },
@@ -302,9 +314,11 @@ function renderBoard() {
                     const number = Number(event.dataTransfer.getData("text/plain"));
                     if (!Number.isInteger(number)) return;
                     try {
-                        await api("/api/move", { method: "POST", body: { number, column: column.id } });
+                        await api("/api/move", { method: "POST", body: {
+                            number, column: column.id, headRefOid: event.dataTransfer.getData("application/x-pr-head") || null,
+                        } });
                     } catch (error) {
-                        toast(error.message, { error: true });
+                        toast(error.message, { error: true, handoff: error.handoff !== false });
                     }
                 },
             },
@@ -331,7 +345,7 @@ function renderBoard() {
     }
 
     const open = board.items.filter((item) => !item.decision).length;
-    const pending = board.items.filter((item) => !item.decision && (!item.review || item.reviewStale)).length;
+    const pending = board.items.filter(isEligibleForAutomaticReview).length;
     el.title.textContent = `Open pull requests — ${board.repo}`;
     el.summary.textContent = [
         `${board.items.length} open`,
@@ -344,37 +358,77 @@ function renderBoard() {
     el.review.disabled = pending === 0;
 }
 
-function columnItems(columnId) {
-    return board.items.filter((item) => item.column === columnId && !item.decision &&
-        item.reviewStatus !== "queued" && !decisionsInFlight.has(item.number));
+function isReviewParked(item) {
+    return item.reviewParked ??
+        (Boolean(item.manualColumn) || PARKED_RECOMMENDATIONS.has(item.review?.recommendation));
+}
+
+function isEligibleForAutomaticReview(item) {
+    return !item.decision &&
+        item.reviewStatus !== "queued" &&
+        !item.manualColumn &&
+        !isReviewParked(item) &&
+        (!item.review || item.reviewStale) &&
+        !decisionsInFlight.has(item.number);
+}
+
+function columnItems(columnId, kind) {
+    return board.items.filter((item) => {
+        if (item.column !== columnId || item.decision || item.reviewStatus === "queued" || decisionsInFlight.has(item.number)) {
+            return false;
+        }
+        if (kind === "rereview") return isEligibleForAutomaticReview(item);
+        if (kind === "request-changes") {
+            return item.review?.recommendation === "request-changes" && !item.manualColumn;
+        }
+        return true;
+    });
 }
 
 function stagedComment(item) {
     return stagedComments.get(item.number) ?? item.review?.suggestedComment ?? "";
 }
 
+function canSuggestApprovalComment(item) {
+    return item?.column === "approve" && !item.decision && item.reviewStatus !== "queued" &&
+        !bulkBusy && !decisionsInFlight.has(item.number) && !el.comment.value.trim() && !stagedComment(item).trim();
+}
+
+function stageDraftComment() {
+    if (selectedNumber !== null) stagedComments.set(selectedNumber, el.comment.value);
+    clearTimeout(pendingConfirm?.timer);
+    pendingConfirm = null;
+    if (currentItem()) renderDrawerHeader();
+}
+
 function renderColumnActions(column) {
-    const count = columnItems(column.id).length;
-    const rejectKind = column.id === "close" ? "close" : "request-changes";
-    const actions = [["approve", "Approve + auto-merge"], [rejectKind, DECISION_LABELS[rejectKind]], ["rereview", "Re-review"]];
+    const actions = {
+        close: [["close", DECISION_LABELS.close]],
+        "needs-attention": [["request-changes", DECISION_LABELS["request-changes"]]],
+        approve: [["approve", DECISION_LABELS.approve]],
+    }[column.id] ?? [];
+    if (!actions.length) return null;
     return h("div", { class: "column-actions", role: "group", "aria-label": `${column.label} bulk actions` },
-        actions.map(([kind, label]) => h("button", {
-            type: "button", class: "btn btn-small", disabled: bulkBusy || !count,
-            title: `Apply to all ${count} eligible PRs in this column, including hidden search results`,
-            onclick: () => bulkAction(column.id, kind),
-        }, `${label} all`)));
+        actions.map(([kind, label]) => {
+            const count = columnItems(column.id, kind).length;
+            return h("button", {
+                type: "button", class: "btn btn-small", disabled: bulkBusy || !count,
+                title: `Apply to all ${count} eligible PRs in this column, including hidden search results`,
+                onclick: () => bulkAction(column.id, kind),
+            }, `${label} all`);
+        }));
 }
 
 async function bulkAction(columnId, kind) {
     if (bulkBusy) return;
-    const items = columnItems(columnId).map((item) => ({
+    const items = columnItems(columnId, kind).map((item) => ({
         number: item.number, headRefOid: item.headRefOid, comment: stagedComment(item),
     }));
     if (!items.length) return;
     if (kind === "close" || kind === "request-changes") {
         const missing = items.filter((item) => !item.comment.trim());
         if (missing.length) {
-            toast(`Stage feedback for ${missing.map((item) => `#${item.number}`).join(", ")} before actioning this column.`, { error: true });
+            toast(`Stage feedback for ${missing.map((item) => `#${item.number}`).join(", ")} before actioning this column.`, { error: true, handoff: false });
             return;
         }
     }
@@ -382,11 +436,13 @@ async function bulkAction(columnId, kind) {
     const preview = items.map((item) => `#${item.number}${kind === "rereview" ? "" : `: ${item.comment || "(no comment)"}`}`).join("\n\n");
     if (!confirm(`${label} all ${items.length} PRs in this column (including hidden search results)?\n${
         kind === "rereview" ? "Queues AI reviews; GitHub is not changed." : kind === "approve" ?
-            "Submits approvals and enables auto-merge with a merge commit." : "Uses each PR's staged comment on GitHub."}\n\n${preview}`)) return;
+            "Submits approvals, authorizes workflows explicitly associated with each PR and reviewed commit, and enables auto-merge with a merge commit. Unassociated runs need individual confirmation. Review contributor code before running it; required checks are not bypassed." : "Uses each PR's staged comment on GitHub."}\n\n${preview}`)) return;
     bulkBusy = true;
     renderBoard();
+    if (currentItem()) renderDrawerHeader();
     let completed = 0;
     const failures = [];
+    let handoff = false;
     try {
         if (kind === "rereview") {
             const result = await api("/api/review", { method: "POST", body: { numbers: items.map((item) => item.number) } });
@@ -395,27 +451,37 @@ async function bulkAction(columnId, kind) {
         }
         for (const item of items) {
             try {
-                const current = columnItems(columnId).find((current) => current.number === item.number);
+                const current = columnItems(columnId, kind).find((current) => current.number === item.number);
                 if (!current || current.headRefOid !== item.headRefOid) {
-                    throw new Error("PR moved, changed, or was already actioned; review it again.");
+                    throw Object.assign(new Error("PR moved, changed, or was already actioned; review it again."), { handoff: false });
+                }
+                if (kind === "approve" && (current.manualColumn === "approve" ? current.approvalStale : current.reviewStale)) {
+                    throw Object.assign(new Error("PR changed since its AI review or manual approval choice; review the current commit before approving."), { handoff: false });
                 }
                 decisionsInFlight.add(item.number);
                 const result = await api("/api/decision", {
-                    method: "POST", body: { number: item.number, kind, comment: item.comment },
+                    method: "POST", body: {
+                        number: item.number, kind, comment: item.comment,
+                        ...(kind !== "close" ? { headRefOid: item.headRefOid } : {}),
+                    },
                 });
                 completed++;
                 if (selectedNumber === item.number) closeDrawer();
-                if (result.warning) failures.push(`#${item.number}: ${result.warning}`);
+                if (result.warning) {
+                    failures.push(`#${item.number}: ${result.warning}`);
+                    handoff = true;
+                }
             } catch (error) {
                 failures.push(`#${item.number}: ${error.message}`);
+                handoff ||= error.handoff !== false;
             } finally {
                 decisionsInFlight.delete(item.number);
             }
         }
         toast(`${label}: ${completed}/${items.length} actions submitted.${failures.length ? ` Attention needed: ${failures.join(" ")}` : ""}`,
-            { error: failures.length > 0 });
+            { error: failures.length > 0, handoff });
     } catch (error) {
-        toast(error.message, { error: true });
+        toast(error.message, { error: true, handoff: error.handoff !== false });
     } finally {
         bulkBusy = false;
         renderBoard();
@@ -433,13 +499,20 @@ function reviewTab(item) {
         return h(
             "div",
             { class: "notice" },
-            h("p", { class: "meta" }, "No AI review recorded yet."),
+            h("p", { class: "meta" }, isReviewParked(item)
+                ? "This pull request is parked. Add new evidence or maintainer direction to start a guided review."
+                : "No AI review recorded yet."),
             h(
                 "button",
                 {
                     class: "btn btn-small btn-primary",
                     type: "button",
                     onclick: async (event) => {
+                        if (isReviewParked(item)) {
+                            el.rereviewPanel.hidden = false;
+                            el.rereviewGuidance.focus();
+                            return;
+                        }
                         const result = await run(
                             event.currentTarget,
                             () => api("/api/review", { method: "POST", body: { numbers: [item.number] } }),
@@ -471,7 +544,9 @@ function reviewTab(item) {
         "div",
         {},
         item.reviewStale
-            ? h("p", { class: "notice" }, "This pull request changed after the review was recorded. Consider a re-review.")
+            ? h("p", { class: "notice" }, item.reviewParked
+                ? "The PR head changed, but this recommendation is parked. Use a guided re-review with new evidence or maintainer direction to revisit it."
+                : "The PR head commit changed after this review. A new review is eligible.")
             : null,
         h("dl", { class: "review-grid" }, rows.map(([term, value]) => [h("dt", {}, term), h("dd", {}, value)])),
         review.reviewedAt ? h("p", { class: "meta", style: "margin-top:12px" }, `Reviewed ${relativeTime(review.reviewedAt)}`) : null,
@@ -546,23 +621,45 @@ function filesTab() {
 }
 
 function checksTab(item) {
-    if (!item.checks?.length) return h("p", { class: "notice" }, "No checks reported for this pull request.");
     return h(
-        "ul",
-        { class: "row-list" },
-        item.checks.map((check) =>
-            h(
-                "li",
-                { class: "row" },
-                h("span", { class: "state-dot", dataset: { state: check.state }, title: check.state }),
-                check.url
-                    ? h(
-                          "a",
-                          { class: "row-name", href: check.url, target: "_blank", rel: "noreferrer noopener" },
-                          check.name,
-                      )
-                    : h("span", { class: "row-name" }, check.name),
-                check.workflow ? h("span", { class: "meta" }, check.workflow) : null,
+        "div",
+        {},
+        item.workflowApprovalError ? h("p", { class: "notice", "data-agent-error": "" }, item.workflowApprovalError) : null,
+        item.workflowApprovals?.length ? h("div", {},
+            h("p", { class: "notice" }, "Workflows await execution approval, including workflows on bot-created PRs. Review the contributor's code before running it. Approve and run checks authorizes the selected run; Approve + auto-merge automatically authorizes only runs GitHub explicitly associates with this PR. Unassociated runs need individual confirmation. Required checks are not bypassed."),
+            h("ul", { class: "row-list" }, item.workflowApprovals.map((workflow) => h("li", { class: "row" },
+                h("span", { class: "state-dot", dataset: { state: "actionRequired" }, title: "Awaiting execution approval" }),
+                h("a", { class: "row-name", href: workflow.url, target: "_blank", rel: "noreferrer noopener" }, `${workflow.name} (run ${workflow.id}, attempt ${workflow.attempt})`),
+                h("span", { class: "meta" }, "awaiting approval"),
+                h("button", {
+                    class: "btn btn-small", type: "button",
+                    disabled: bulkBusy || decisionsInFlight.has(item.number),
+                    onclick: (event) => submitWorkflowApproval(event.currentTarget, item, workflow),
+                }, "Approve and run checks"),
+            ))),
+        ) : null,
+        item.checkCounts?.actionRequired ? h("p", { class: "notice" },
+            "Action-required checks can also be submission gates awaiting PR reviews. Only eligible workflow runs above can be authorized here. Deployment approvals and other gates must be handled on GitHub.") : null,
+        !item.checks?.length ? h("p", { class: "notice" }, item.workflowApprovals?.length
+            ? "Workflow jobs will appear after execution is approved."
+            : "No checks reported for this pull request.") : h(
+            "ul",
+            { class: "row-list" },
+            item.checks.map((check) =>
+                h(
+                    "li",
+                    { class: "row" },
+                    h("span", { class: "state-dot", dataset: { state: check.state }, title: check.state }),
+                    check.url
+                        ? h(
+                              "a",
+                              { class: "row-name", href: check.url, target: "_blank", rel: "noreferrer noopener" },
+                              check.name,
+                          )
+                        : h("span", { class: "row-name" }, check.name),
+                    check.workflow ? h("span", { class: "meta" }, check.workflow) : null,
+                    h("span", { class: "meta" }, check.state === "actionRequired" ? "action required" : check.state),
+                ),
             ),
         ),
     );
@@ -588,7 +685,7 @@ function renderDrawerBody() {
         return;
     }
     if (detailError) {
-        el.drawerBody.replaceChildren(h("p", { class: "notice" }, detailError));
+        el.drawerBody.replaceChildren(h("p", { class: "notice", ...(detailErrorHandoff ? { "data-agent-error": "" } : {}) }, detailError));
         return;
     }
     if (!detail || detail.number !== item.number) {
@@ -625,6 +722,10 @@ function renderDrawerHeader() {
     el.drawerColumn.value = item.column;
     el.drawerColumn.disabled = Boolean(item.decision);
     el.rereviewToggle.disabled = Boolean(item.decision) || item.reviewStatus === "queued";
+    el.rereviewToggle.textContent = item.reviewParked ? "Guided re-review…" : "Re-review…";
+    const canSuggest = canSuggestApprovalComment(item);
+    el.commentSuggestion.hidden = !canSuggest;
+    el.addSuggestedComment.disabled = !canSuggest;
 
     for (const button of el.drawer.querySelectorAll("[data-decision]")) {
         button.disabled = bulkBusy || Boolean(item.decision) || decisionsInFlight.has(item.number);
@@ -638,16 +739,23 @@ function renderDrawerHeader() {
 async function loadDetail(number, { force = false } = {}) {
     if (selectedNumber !== number) return;
     const generation = ++detailGeneration;
+    const headRefOid = currentItem()?.headRefOid;
+    previewHeadRefOid = null;
     detail = null;
     detailError = null;
     renderDrawerBody();
     try {
         const response = await api(`/api/pr/${number}`, force ? { method: "POST" } : {});
         if (generation !== detailGeneration || selectedNumber !== number) return;
+        if (response.headRefOid && response.headRefOid !== headRefOid) {
+            throw Object.assign(new Error("PR changed while loading its preview; refresh and review the current commit."), { handoff: false });
+        }
         detail = response;
+        previewHeadRefOid = response.headRefOid ?? null;
     } catch (error) {
         if (generation !== detailGeneration || selectedNumber !== number) return;
         detailError = error.message;
+        detailErrorHandoff = error.handoff !== false;
     }
     if (selectedNumber === number) renderDrawerBody();
 }
@@ -669,6 +777,7 @@ function openDrawer(number) {
         el.comment.value = stagedComment(item);
         detail = null;
         detailError = null;
+        previewHeadRefOid = null;
     }
     renderDrawerHeader();
     renderDrawerBody();
@@ -682,6 +791,7 @@ function closeDrawer() {
     selectedNumber = null;
     detail = null;
     detailError = null;
+    previewHeadRefOid = null;
     clearTimeout(pendingConfirm?.timer);
     pendingConfirm = null;
     el.drawer.classList.remove("open");
@@ -696,6 +806,35 @@ function closeDrawer() {
 }
 
 /* --------------------------------------------------------------- decisions */
+
+async function submitWorkflowApproval(button, item, workflow) {
+    if (bulkBusy || decisionsInFlight.has(item.number)) return;
+    const current = currentItem();
+    if (!current || current.number !== item.number || current.headRefOid !== workflow.headRefOid ||
+        !current.workflowApprovals?.some((run) => run.id === workflow.id && run.attempt === workflow.attempt)) {
+        toast("Workflow or PR changed. Refresh before approving workflow execution.", { error: true, handoff: false });
+        return;
+    }
+    if (!confirm(`Approve and run "${workflow.name}" (run ${workflow.id}, attempt ${workflow.attempt}) for #${item.number} at ${workflow.headRefOid}?\n\nThis authorizes execution of contributor code using the authenticated gh account. Review that code first. It does not submit a PR review, enable auto-merge, or bypass required checks.`)) return;
+    clearTimeout(pendingConfirm?.timer);
+    pendingConfirm = null;
+    decisionsInFlight.add(item.number);
+    renderDrawerHeader();
+    renderDrawerBody();
+    const result = await run(button, () => api("/api/workflow-approval", { method: "POST", body: {
+        number: item.number, runId: workflow.id, attempt: workflow.attempt,
+        headRefOid: workflow.headRefOid, confirmed: true,
+    } }));
+    decisionsInFlight.delete(item.number);
+    if (selectedNumber === item.number) {
+        renderDrawerHeader();
+        renderDrawerBody();
+    }
+    if (result) {
+        if (result.warning) toast(result.warning, { error: true, url: result.url });
+        else toast(`#${item.number}: workflow execution approved; checks may now queue or run.`, { url: workflow.url });
+    }
+}
 
 function armConfirm(button, kind) {
     if (pendingConfirm?.kind === kind) return true;
@@ -721,6 +860,10 @@ function armConfirm(button, kind) {
 async function submitDecision(button, kind) {
     const item = currentItem();
     if (!item || bulkBusy || decisionsInFlight.has(item.number)) return;
+    if (kind === "approve" && (!previewHeadRefOid || previewHeadRefOid !== item.headRefOid)) {
+        toast("PR preview is loading or changed; review the current commit before approving.", { error: true, handoff: false });
+        return;
+    }
     if (!armConfirm(button, kind)) return;
     clearTimeout(pendingConfirm.timer);
     pendingConfirm = null;
@@ -730,7 +873,10 @@ async function submitDecision(button, kind) {
     decisionsInFlight.add(item.number);
     renderDrawerHeader();
     const result = await run(button, () =>
-        api("/api/decision", { method: "POST", body: { number: item.number, kind, comment } }),
+        api("/api/decision", { method: "POST", body: {
+            number: item.number, kind, comment,
+            ...(kind !== "close" ? { headRefOid: kind === "approve" ? previewHeadRefOid : item.headRefOid } : {}),
+        } }),
     );
     decisionsInFlight.delete(item.number);
     if (selectedNumber === item.number) renderDrawerHeader();
@@ -814,10 +960,10 @@ el.drawerColumn.addEventListener("change", async (event) => {
     const column = event.target.value;
     if (column === item.column) return;
     try {
-        await api("/api/move", { method: "POST", body: { number: item.number, column } });
+        await api("/api/move", { method: "POST", body: { number: item.number, column, headRefOid: item.headRefOid } });
         if (selectedNumber === item.number) closeDrawer();
     } catch (error) {
-        toast(error.message, { error: true });
+        toast(error.message, { error: true, handoff: error.handoff !== false });
         event.target.value = item.column;
     }
 });
@@ -876,27 +1022,35 @@ for (const button of el.drawer.querySelectorAll("[data-decision]")) {
     button.addEventListener("click", () => submitDecision(button, button.dataset.decision));
 }
 
-el.comment.addEventListener("input", () => {
-    if (selectedNumber !== null) stagedComments.set(selectedNumber, el.comment.value);
-    clearTimeout(pendingConfirm?.timer);
-    pendingConfirm = null;
-    if (currentItem()) renderDrawerHeader();
+el.comment.addEventListener("input", stageDraftComment);
+
+el.addSuggestedComment.addEventListener("click", () => {
+    if (!canSuggestApprovalComment(currentItem())) return;
+    el.comment.value = APPROVAL_COMMENT_TEMPLATE;
+    stageDraftComment();
+    el.comment.focus();
 });
 
 function applySnapshot(snapshot) {
+    const previousHead = currentItem()?.headRefOid;
+    const refreshed = board?.updatedAt !== snapshot.updatedAt;
     board = snapshot;
     renderBoard();
     if (selectedNumber !== null) {
         if (!currentItem()) closeDrawer();
         else {
             renderDrawerHeader();
-            renderDrawerBody();
+            if (previousHead !== currentItem().headRefOid || (refreshed && detailError)) {
+                loadDetail(selectedNumber, { force: true });
+            }
+            else renderDrawerBody();
         }
     }
 }
 
 const events = new EventSource(`/events?token=${encodeURIComponent(TOKEN)}`);
 events.addEventListener("board", (event) => applySnapshot(JSON.parse(event.data)));
+events.addEventListener("refresh-error", (event) => toast(JSON.parse(event.data).error, { error: true }));
 events.addEventListener("error", () => {
     el.summary.textContent = "Connection lost — reopen the canvas to reconnect.";
 });

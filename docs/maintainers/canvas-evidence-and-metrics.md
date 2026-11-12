@@ -17,7 +17,7 @@ Phase 1 owns reviewer routing (CODEOWNERS, `.github/review-routing.yml`, reviewe
 
 - **Skipped (success)** when the PR changes no canvas extension or extension-bearing plugin paths, including ordinary plugin-only changes and checker/workflow-only changes.
 - **Pass (removal accepted)** when an extension directory and its plugin were both deleted. Deleting only `extension.mjs`, or leaving a plugin that still references or was the direct plugin for a deleted extension, fails.
-- **Pass or fail** otherwise, from `eng/canvas-smoke-test.mjs`.
+- **Pass or fail** otherwise, from `.github/scripts/canvas/canvas-smoke-test.mjs`.
 
 For each affected extension, the checker:
 
@@ -26,7 +26,7 @@ For each affected extension, the checker:
 | Module graph | Parses `extension.mjs` and every reachable local module **without executing it** (`vm.SourceTextModule` / `vm.compileFunction`). Reachability follows static imports, literal dynamic `import()` calls, and literal CommonJS `require()` calls (call-shaped text inside strings, templates, and regexes is ignored). `package.json` `imports` aliases (`#name`) resolve through the same checks; alias shapes the checker cannot analyze fail. Every reachable reference must resolve to a file inside the extension, a Node.js built-in, the host-provided `@github/copilot-sdk`, or a runtime dependency (`dependencies`, `optionalDependencies`, `peerDependencies`). Remote (`http:`/`https:`), `data:`, absolute, `..`, missing, `devDependencies`-only, and undeclared references fail. Modules not reachable from `extension.mjs` (often browser assets for the canvas webview) produce warnings instead. |
 | Files | Missing referenced files, unsafe paths (`..`, absolute paths, `file:` URLs), symlinks, committed `node_modules`, native binaries (ELF, PE, Mach-O, `.node`, `.dll`, `.so`, WebAssembly), executable git modes, and files over 5 MB fail. Shell, batch, PowerShell, Python, Ruby, and Perl scripts, shebang files, and unrecognized binaries are reported as warnings for the reviewer. |
 | Preview | `assets/preview.png` must exist, decode as a real PNG (signature, chunk CRCs, `IHDR`, palette, `IEND`, inflated image data and filter bytes), be at most 5 MB, decode to at most 256 MiB of image data (checked before decompression), and meet the minimum dimensions. |
-| Plugin | Materializes the plugin with `eng/materialize-plugins.mjs` in a temporary copy, validates the served `plugin.json` against the Agent Plugins schema, and confirms `com.github.copilot/extensions/<id>/extension.mjs` exists. |
+| Plugin | Materializes the plugin with `.github/scripts/catalog/materialize-plugins.mjs` in a temporary copy, validates the served `plugin.json` against the Agent Plugins schema, and confirms `com.github.copilot/extensions/<id>/extension.mjs` exists. |
 | Install | Installs the materialized plugin with the GitHub Copilot CLI from an ephemeral local marketplace, in an isolated `COPILOT_HOME` with all tokens removed, and verifies it with `copilot plugin list --json`. CI uses `--install require`. |
 | Capabilities | Summarizes what an extension uses (for example filesystem, child processes, network, `process.env`, dynamic code) so reviewers can compare it with the stated purpose. |
 
@@ -41,16 +41,102 @@ The job writes a concise report to the job summary and uploads the `canvas-smoke
 ### Running locally
 
 ```bash
-node eng/canvas-smoke-test.mjs --all --install never          # every extension, no CLI install
-node eng/canvas-smoke-test.mjs --changed-files changed.txt   # only what a diff touches
-node --test eng/canvas-smoke-test.test.mjs
+node .github/scripts/canvas/canvas-smoke-test.mjs --all --install never          # every extension, no CLI install
+node .github/scripts/canvas/canvas-smoke-test.mjs --changed-files changed.txt   # only what a diff touches
+node --test .github/scripts/canvas/canvas-smoke-test.test.mjs
 ```
 
 Exit codes: `0` pass or skipped, `1` contribution problems, `2` infrastructure error.
 
+### Optional error handoff
+
+Repository-local canvases under `.github/extensions/` offer a
+**Send to agent** action for handled errors. The error tray is additive: existing
+messages, fallback UI, retries and recovery controls remain available. The tray
+uses normal document flow, moves into an active dialog/drawer's interaction scope,
+and does not overlay decision controls. Dismiss
+only removes the tray entry; it does not retry the operation or start an agent.
+Public canvases under `extensions/` do not include this feature.
+Expected reconnect notices, local validation guidance and content-invalidation
+warnings keep their existing presentation without offering repair handoffs.
+Expected API notices carry `handoff: false` through the response and renderer so
+fetch capture cannot turn a recoverable conflict into a repair request. Actual
+partial failures, including failed local receipts after a GitHub action, remain eligible.
+Detail-view catches preserve this classification too, including stale items and
+resources changed since scanning. A failed reload after reset remains eligible;
+handoff never repeats the reset.
+
+Clicking **Send to agent** requests one child project session in
+`github/awesome-copilot` to investigate and attempt a fix. The tray displays the
+bounded, redacted diagnostic text before sending. Context includes the extension
+source directory, canvas, operation and allow-listed repository/item identifiers,
+not request bodies, headers, environment variables, raw stacks, URL query strings
+or fragments. Common credentials, complete Authorization/Proxy-Authorization and
+Cookie/Set-Cookie fields, and private keys are redacted on both sides, with bounded
+input processing. Decoded JSON string fields are redacted before reserialization.
+JSON diagnostics, including prefixed JSON and JSON encoded inside string fields,
+are inspected with a bounded nesting depth before text redaction. Invalid or incomplete
+embedded JSON is conservatively replaced rather than forwarded.
+Review the displayed text before sending; do not include sensitive data in errors.
+The child is instructed not to commit, push, publish a PR, change credentials or
+repeat a destructive/remote operation.
+
+The supported extension API joins the current session; it does not directly
+create app child sessions. Consequently the handoff sends a request to the parent
+agent using `session.send`, and the parent uses `create_session` and reports the
+actual returned child ID (or a creation error) through the canvas's
+`record_error_handoff` action. **Message admission is not success.** While the
+parent is busy or waiting for approval, the tray remains pending. After two
+minutes from the initial dispatch without confirmation (including stalled network
+requests or response bodies), it tells the user to inspect the parent
+conversation; it never automatically creates another child. Dispatch failures,
+child-creation failures and uncertain receipts remain visible rather than showing
+a successful handoff. A transport rejection is an uncertain dispatch, not a
+definitive creation failure: the tray keeps polling within the same deadline and
+accepts a matching child receipt without resending the prompt.
+Dispatch completion never blocks status polling, so a recorded receipt remains
+available even if the message transport does not settle.
+Closing the canvas invalidates its outstanding receipts.
+Receipts remain visible until explicitly dismissed; new diagnostics do not evict them.
+Handoff POSTs also require a random per-instance capability token delivered only
+in the canvas URL fragment, not HTTP-served HTML or scripts. Origin and Host headers alone cannot
+authorize a handoff, and one instance cannot read or submit another's requests.
+Registered `127.0.0.1` and `localhost` URLs are supported, with the Origin required
+to match the exact registered Host and the connection still restricted to loopback.
+The token is never included in diagnostic prompts and expires when the canvas closes.
+
+Implementation lives in `.github/scripts/canvas/error-handoff/runtime.mjs`. Each applicable
+repository-local canvas includes a generated `error-handoff.mjs` copy so its
+extension remains self-contained. The synchronization script only targets
+`.github/extensions/`. Make changes in the canonical module, then regenerate:
+
+```bash
+node .github/scripts/canvas/sync-canvas-error-handoff.mjs
+node .github/scripts/canvas/sync-canvas-error-handoff.mjs --check
+node --test .github/scripts/canvas/canvas-error-handoff.test.mjs
+```
+
+Canvas entrypoints configure the helper with their supported SDK `createCanvas`
+and `joinSession` functions; HTTP servers use its `createServer` wrapper. Only
+registered canvas documents gain the client script. Other HTML, artifact previews,
+downloads, SSE and API responses retain their original delivery behavior. Existing
+CSPs, including nonce-only and inline-only script policies, are preserved.
+
+The client detects failed same-origin fetches and explicitly marked board-owned
+error surfaces (including marked failure toasts), excluding rendered Markdown/file content.
+Missing-input prompts and other expected workflow notices are not marked for handoff.
+Cancellation and content-invalidation notices are not repair errors. Identical
+redacted messages share one handoff for the document lifetime, even after dismissal;
+the first operation is retained as context.
+For errors without a semantic error selector, mark only the failure state with
+`data-agent-error` (clear it on recovery), or call
+`window.canvasErrorHandoff?.report(message, operation)`. Do not mark success
+toasts, entire documents, user content, or containers containing credentials.
+Additional error surfaces in these boards should use the marker or reporting API.
+
 ## Weekly operating metrics
 
-`.github/workflows/review-metrics.yml` runs every Monday at 14:00 UTC and on demand. `eng/review-metrics.mjs` collects read-only data and then:
+`.github/workflows/review-metrics.yml` runs every Monday at 14:00 UTC and on demand. `.github/scripts/review/review-metrics.mjs` collects read-only data and then:
 
 - writes the report to the job summary and uploads the `review-metrics` artifact (`metrics.json` and `report.md`, 90-day retention);
 - updates the body of the tracking issue labeled `review-metrics`, creating and pinning it the first time;
@@ -76,8 +162,8 @@ All times are UTC. The window is the previous `window_days` (default 7) days. PR
 ### Running locally
 
 ```bash
-node eng/review-metrics.mjs --repo github/awesome-copilot --dry-run --output-dir ./metrics
-node --test eng/review-metrics.test.mjs
+node .github/scripts/review/review-metrics.mjs --repo github/awesome-copilot --dry-run --output-dir ./metrics
+node --test .github/scripts/review/review-metrics.test.mjs
 ```
 
 ## Deferred: auto-merge
@@ -94,9 +180,9 @@ The #4184 automation is driven by repository-local configuration and self-contai
 | `.github/review-routing.yml` | 1 | Copy and edit | Reviewer pools, targets, escalation |
 | `.github/risk-tiers.yml` | 2 | Copy and edit | Path and risk classification rules |
 | `submission-gate` check | 2 | Copy the workflow and script | Required checks per tier; include `canvas-smoke-test` only where canvas extensions exist |
-| `canvas-smoke-test` (`eng/canvas-smoke-test.mjs`, `canvas-smoke-test.yml`, `canvas-smoke-test-comment.yml`) | 3 | Copy as-is where the repository ships canvas extensions and `eng/materialize-plugins.mjs` | `CANVAS_PREVIEW_MIN_WIDTH` and `CANVAS_PREVIEW_MIN_HEIGHT` variables |
-| `.github/review-metrics.yml`, `eng/review-metrics.mjs`, `.github/workflows/review-metrics.yml` | 3 | Copy as-is | State and risk labels, automation workflow list, tracking issue title |
-| `eng/lib/review-automation-github.mjs` | 3 | Copy as-is | None (uses `GITHUB_TOKEN` or the `gh` CLI) |
+| `canvas-smoke-test` (`.github/scripts/canvas/canvas-smoke-test.mjs`, `canvas-smoke-test.yml`, `canvas-smoke-test-comment.yml`) | 3 | Copy as-is where the repository ships canvas extensions and `.github/scripts/catalog/materialize-plugins.mjs` | `CANVAS_PREVIEW_MIN_WIDTH` and `CANVAS_PREVIEW_MIN_HEIGHT` variables |
+| `.github/review-metrics.yml`, `.github/scripts/review/review-metrics.mjs`, `.github/workflows/review-metrics.yml` | 3 | Copy as-is | State and risk labels, automation workflow list, tracking issue title |
+| `.github/scripts/review/lib/review-automation-github.mjs` | 3 | Copy as-is | None (uses `GITHUB_TOKEN` or the `gh` CLI) |
 
 The phase 3 scripts depend only on Node.js 22 and `js-yaml`. Workflows gate automatic runs on `github.repository_owner == 'github'`; update that condition when porting. `.github/workflows/setup-labels.yml` creates the `review-metrics` label.
 

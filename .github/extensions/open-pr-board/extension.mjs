@@ -1,18 +1,22 @@
 // Extension: open-pr-board
 // Review board for open pull requests: AI review with persistent state tracking,
-// approve / request-changes / needs-insight / close recommendations, visible labels,
+// approve / request-changes / needs-insight / probably-reject / close recommendations, visible labels,
 // and GitHub actions. Decisions are applied through the authenticated gh CLI and
 // recorded on the board. Board state is persisted under session.workspacePath
 // so writes do not change the extension fingerprint.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
-import { BoardStore, RECOMMENDATIONS } from "./lib/state.mjs";
+import { CanvasError } from "@github/copilot-sdk/extension";
+import { joinSession as sdkJoinSession, createCanvas as sdkCreateCanvas } from "@github/copilot-sdk/extension";
+import { configureErrorHandoff } from "./error-handoff.mjs";
+const { joinSession, createCanvas } = configureErrorHandoff({ joinSession: sdkJoinSession, createCanvas: sdkCreateCanvas });
+import { BoardStore, MOVE_COLUMNS, RECOMMENDATIONS, isEligibleForAutomaticReview } from "./lib/state.mjs";
 import * as gh from "./lib/github.mjs";
-import { applyDecisionOnGitHub } from "./lib/decisions.mjs";
+import { applyDecisionOnGitHub, approveWorkflowOnGitHub } from "./lib/decisions.mjs";
 import { buildReviewPrompt, buildRereviewPrompt, REVIEW_FIELDS_SCHEMA } from "./lib/review-prompt.mjs";
 import { startBoardServer, expectedError } from "./lib/server.mjs";
+import { expectedNotice } from "./lib/errors.mjs";
 
 const CANVAS_ID = "open-pr-board";
 const DEFAULT_REPO = "github/awesome-copilot";
@@ -97,32 +101,47 @@ async function resetBoard(store) {
 async function getPullRequest(store, number, { force = false } = {}) {
     const key = cacheKey(store.repo, number);
     const cached = detailCache.get(key);
-    if (!force && cached && Date.now() - cached.at < DETAIL_TTL_MS) return cached.data;
-    const data = await gh.getPullRequestDetail(store.repo, number);
-    detailCache.set(key, { at: Date.now(), data });
-    return data;
+    if (!force && cached?.data && Date.now() - cached.at < DETAIL_TTL_MS) return cached.data;
+    const request = {};
+    detailCache.set(key, request);
+    try {
+        const data = await gh.getPullRequestDetail(store.repo, number);
+        if (detailCache.get(key) === request) detailCache.set(key, { at: Date.now(), data });
+        return data;
+    } finally {
+        if (detailCache.get(key) === request) detailCache.delete(key);
+    }
 }
 
 function requireItem(store, number) {
     const item = store.getItem(number);
-    if (!item) throw new Error(`Pull request #${number} is not on the board. Refresh first.`);
+    if (!item) throw expectedNotice(`Pull request #${number} is not on the board. Refresh first.`);
     return item;
 }
 
 function pendingReview(store, numbers) {
     const snapshot = store.snapshot();
+    const candidates = snapshot.items.filter(isEligibleForAutomaticReview);
     if (Array.isArray(numbers) && numbers.length) {
         const wanted = new Set(numbers.map(Number));
-        return snapshot.items.filter((item) => wanted.has(item.number) && !item.decision && item.reviewStatus !== "queued");
+        return candidates.filter((item) => wanted.has(item.number));
     }
-    // Default pass: anything never reviewed, plus reviews invalidated by new commits.
-    return snapshot.items.filter((item) => !item.decision && item.reviewStatus !== "queued" && (!item.review || item.reviewStale));
+    return candidates;
 }
 
 async function startReview({ store, numbers, instanceId, send }) {
     const candidates = pendingReview(store, numbers);
+    const snapshot = store.snapshot();
+    const wanted = Array.isArray(numbers) && numbers.length ? new Set(numbers.map(Number)) : null;
+    const selected = snapshot.items.filter((item) => !wanted || wanted.has(item.number));
+    const parked = selected.filter((item) => !item.decision && item.reviewParked).length;
     if (!candidates.length) {
-        return { queued: [], message: "Nothing to review — every open pull request already has a current AI review." };
+        return {
+            queued: [],
+            message: parked
+                ? `Nothing queued — ${parked} pull request(s) are parked for maintainer attention. Use a guided re-review with new evidence or direction to queue one.`
+                : "Nothing to review — every eligible open pull request already has a current AI review.",
+        };
     }
     const { previous, queued } = await store.markQueued(candidates.map((item) => item.number));
     const queueIds = new Map(queued.map((entry) => [entry.number, entry.queueId]));
@@ -143,17 +162,21 @@ async function startReview({ store, numbers, instanceId, send }) {
     }
     return {
         queued: items.map((item) => item.number),
-        message: `Asked the agent to review ${items.length} pull request${items.length === 1 ? "" : "s"}.`,
+        message: `Asked the agent to review ${items.length} pull request${items.length === 1 ? "" : "s"}.${parked ? ` Skipped ${parked} parked pull request(s); use guided re-review to revisit them.` : ""}`,
     };
 }
 
 async function startRereview({ store, number, guidance, instanceId, send }) {
     const item = requireItem(store, Number(number));
-    if (item.decision) throw new Error(`#${item.number} was already actioned (${item.decision.kind}).`);
-    if (item.reviewStatus === "queued") throw new Error(`#${item.number} is already queued for review.`);
+    const snapshotItem = store.snapshot().items.find((entry) => entry.number === item.number);
+    if (item.decision) throw expectedNotice(`#${item.number} was already actioned (${item.decision.kind}).`);
+    if (item.reviewStatus === "queued") throw expectedNotice(`#${item.number} is already queued for review.`);
     const text = String(guidance ?? "")
         .trim()
         .slice(0, MAX_GUIDANCE_LENGTH);
+    if ((snapshotItem?.reviewParked || (item.review && !snapshotItem?.reviewStale)) && !text) {
+        throw expectedNotice("Add the new evidence or maintainer direction that justifies re-reviewing this parked or unchanged pull request.");
+    }
     const previousReview = item.review;
     const { previous, queued } = await store.markQueued([item.number]);
     const prompt = buildRereviewPrompt({
@@ -182,6 +205,7 @@ function boardSummary(store) {
         counts: snapshot.counts,
         items: snapshot.items.map((item) => ({
             number: item.number,
+            headRefOid: item.headRefOid,
             title: item.title,
             author: item.author,
             url: item.url,
@@ -189,10 +213,14 @@ function boardSummary(store) {
             isDraft: item.isDraft,
             labels: item.labels.map((label) => label.name),
             checksState: item.checksState,
+            workflowApprovals: item.workflowApprovals ?? [],
+            workflowApprovalError: item.workflowApprovalError ?? null,
             reviewDecision: item.reviewDecision,
             aiRecommendation: item.review?.recommendation ?? null,
             aiRationale: item.review?.rationale ?? null,
             reviewStale: item.reviewStale,
+            reviewParked: item.reviewParked,
+            approvalStale: item.approvalStale,
             reviewStatus: item.reviewStatus,
             manualOverride: item.manualColumn ?? null,
             suggestedComment: item.review?.suggestedComment ?? null,
@@ -211,11 +239,19 @@ function routesFor(instanceId, store) {
         "POST /api/review": ({ body }) => startReview({ store, numbers: body.numbers, instanceId, send: true }),
         "POST /api/rereview": ({ body }) =>
             startRereview({ store, number: body.number, guidance: body.guidance, instanceId, send: true }),
-        "POST /api/move": ({ body }) => store.moveItem(Number(body.number), String(body.column)),
+        "POST /api/move": ({ body }) => store.moveItem(Number(body.number), String(body.column), body.headRefOid),
         "GET /api/pr/:number": ({ number }) => getPullRequest(store, number),
         "POST /api/pr/:number": ({ number }) => getPullRequest(store, number, { force: true }),
         "POST /api/decision": ({ body }) =>
-            applyDecisionOnGitHub({ store, number: Number(body.number), kind: body.kind, comment: body.comment, refresh }),
+            applyDecisionOnGitHub({
+                store, number: Number(body.number), kind: body.kind, comment: body.comment,
+                headRefOid: body.headRefOid, refresh,
+            }),
+        "POST /api/workflow-approval": ({ body }) =>
+            approveWorkflowOnGitHub({
+                store, number: Number(body.number), runId: body.runId, attempt: body.attempt,
+                headRefOid: body.headRefOid, confirmed: body.confirmed, refresh,
+            }),
     };
     // Board errors are user-facing messages (gh failures, "already actioned", ...); surface only the
     // message text, never the stack, and log the full error for debugging.
@@ -230,7 +266,8 @@ function routesFor(instanceId, store) {
                         level: "warning",
                         ephemeral: true,
                     });
-                    throw expectedError(String(error?.message ?? "Request failed"), 400);
+                    throw Object.assign(expectedError(String(error?.message ?? "Request failed"), 400),
+                        { handoff: error.handoff !== false });
                 }
             },
         ]),
@@ -279,7 +316,7 @@ session = await joinSession({
                 {
                     name: "start_review",
                     description:
-                        "Queue pull requests for AI review (defaults to everything unreviewed or changed since its last review) and return the review instructions to follow.",
+                        "Queue eligible pull requests for AI review. Parked recommendations and manual holds are excluded; use guided re-review to revisit them.",
                     inputSchema: {
                         type: "object",
                         additionalProperties: false,
@@ -296,7 +333,7 @@ session = await joinSession({
                 },
                 {
                     name: "start_rereview",
-                    description: "Queue one pull request for a guided re-review and return the instructions to run it.",
+                    description: "Queue one pull request for a guided re-review; new evidence or maintainer direction is required for parked or unchanged pull requests.",
                     inputSchema: {
                         type: "object",
                         additionalProperties: false,
@@ -342,11 +379,12 @@ session = await joinSession({
                         properties: {
                             repo: repoProperty,
                             number: { type: "integer" },
-                            column: { type: "string", enum: ["unreviewed", ...RECOMMENDATIONS] },
+                            column: { type: "string", enum: MOVE_COLUMNS },
+                            headRefOid: { type: "string", description: "Commit SHA displayed when choosing the bucket; required for a current manual approval choice." },
                         },
                     },
                     handler: wrap(async (ctx) =>
-                        (await storeForContext(ctx)).moveItem(ctx.input.number, ctx.input.column),
+                        (await storeForContext(ctx)).moveItem(ctx.input.number, ctx.input.column, ctx.input.headRefOid),
                     ),
                 },
                 {

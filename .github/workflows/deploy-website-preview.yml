@@ -17,7 +17,7 @@ on:
       - ".github/workflows/**"
       - "extensions/**"
       - "cookbook/**"
-      - "eng/**"
+      - ".github/scripts/**"
       - ".all-contributorsrc"
       - "package.json"
       - "package-lock.json"
@@ -47,8 +47,14 @@ jobs:
           node-version: "24"
           cache: "npm"
 
+      - name: Test plugin install links
+        run: node --test website/scripts/plugin-install.test.mjs
+
       - name: Install root dependencies
         run: npm ci
+
+      - name: Test website data generation
+        run: node --test .github/scripts/catalog/generate-website-data.test.mjs
 
       - name: Install website dependencies
         run: npm ci
