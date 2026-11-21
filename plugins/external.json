@@ -135,7 +135,7 @@
   {
     "name": "aks-skills",
     "description": "AKS operational skills for troubleshooting, advanced cost-efficiency analysis, known issues, GPU inference, and packet capture.",
-    "version": "1.0.16",
+    "version": "1.0.19",
     "author": {
       "name": "Microsoft",
       "url": "https://www.microsoft.com"
@@ -157,7 +157,7 @@
       "source": "github",
       "repo": "microsoft/azure-skills",
       "path": ".github/plugins/aks-skills",
-      "sha": "233c51fc11c73d459be46e099e417ebaf3d20a26"
+      "sha": "0e26cd9c153ca37a04ad7b01f0dc8766a9e14038"
     }
   },
   {
@@ -273,7 +273,7 @@
   {
     "name": "azure",
     "description": "Microsoft Azure MCP and Skills integration for cloud resource management, deployments, and Azure services. Manage your Azure infrastructure, monitor applications, and deploy resources directly from your development environment.",
-    "version": "1.2.125",
+    "version": "1.2.131",
     "author": {
       "name": "Microsoft",
       "url": "https://www.microsoft.com"
@@ -295,13 +295,13 @@
       "source": "github",
       "repo": "microsoft/azure-skills",
       "path": ".github/plugins/azure-skills",
-      "sha": "81dd499c31fb26dc002c0829796ddaba5a7e5dbc"
+      "sha": "e86a60a721a39e6d8fa1621fcaa6750ad5e0e17d"
     }
   },
   {
     "name": "azure-advisor",
     "description": "Azure Advisor recommendations, service-retirement impact, and customer-ready remediation guidance.",
-    "version": "1.0.13",
+    "version": "1.0.16",
     "author": {
       "name": "Microsoft",
       "url": "https://www.microsoft.com"
@@ -320,7 +320,7 @@
       "source": "github",
       "repo": "microsoft/azure-skills",
       "path": ".github/plugins/azure-advisor",
-      "sha": "233c51fc11c73d459be46e099e417ebaf3d20a26"
+      "sha": "0e26cd9c153ca37a04ad7b01f0dc8766a9e14038"
     }
   },
   {
@@ -353,7 +353,7 @@
   {
     "name": "azure-cost",
     "description": "Azure cost analysis, estimation, optimization, and governance workflows backed by Azure Resource Manager MCP.",
-    "version": "1.0.22",
+    "version": "1.0.25",
     "author": {
       "name": "Microsoft",
       "url": "https://www.microsoft.com"
@@ -375,7 +375,7 @@
       "source": "github",
       "repo": "microsoft/azure-skills",
       "path": ".github/plugins/azure-cost",
-      "sha": "233c51fc11c73d459be46e099e417ebaf3d20a26"
+      "sha": "0e26cd9c153ca37a04ad7b01f0dc8766a9e14038"
     }
   },
   {
@@ -460,7 +460,7 @@
   {
     "name": "azure-kusto-graph-skills",
     "description": "Kusto graph analysis, IRQL security hunting pipelines, and graph visualization skills for Azure Data Explorer.",
-    "version": "1.0.38",
+    "version": "1.0.41",
     "author": {
       "name": "Microsoft",
       "url": "https://www.microsoft.com"
@@ -480,7 +480,59 @@
       "source": "github",
       "repo": "microsoft/azure-skills",
       "path": ".github/plugins/azure-kusto-graph-skills",
-      "sha": "233c51fc11c73d459be46e099e417ebaf3d20a26"
+      "sha": "0e26cd9c153ca37a04ad7b01f0dc8766a9e14038"
+    }
+  },
+  {
+    "name": "azure-local-skills",
+    "description": "Azure Local skills covering standard deployments (Azure Stack HCI, 1-16 node hyperconverged, rack-aware clusters) and multi-rack (rack scale) deployments built on Network Fabric Controller, Cluster Manager, and managed network fabric.",
+    "version": "1.0.30",
+    "author": {
+      "name": "Microsoft",
+      "url": "https://www.microsoft.com"
+    },
+    "repository": "https://github.com/microsoft/azure-skills",
+    "homepage": "https://github.com/microsoft/github-copilot-for-azure",
+    "license": "MIT",
+    "keywords": [
+      "azure",
+      "azure-local",
+      "azure-stack-hci",
+      "hybrid",
+      "arc",
+      "multi-rack",
+      "network-fabric"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "microsoft/azure-skills",
+      "path": ".github/plugins/azure-local-skills",
+      "sha": "0e26cd9c153ca37a04ad7b01f0dc8766a9e14038"
+    }
+  },
+  {
+    "name": "azure-observability",
+    "description": "Guide read-only Azure web/API and Foundry-agent troubleshooting, approved fixes, and evidence-based recovery validation.",
+    "version": "1.0.2",
+    "author": {
+      "name": "Microsoft",
+      "url": "https://www.microsoft.com"
+    },
+    "repository": "https://github.com/microsoft/azure-skills",
+    "homepage": "https://github.com/microsoft/github-copilot-for-azure",
+    "license": "MIT",
+    "keywords": [
+      "azure",
+      "observability",
+      "troubleshooting",
+      "monitor",
+      "foundry"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "microsoft/azure-skills",
+      "path": ".github/plugins/azure-observability",
+      "sha": "e86a60a721a39e6d8fa1621fcaa6750ad5e0e17d"
     }
   },
   {
@@ -760,7 +812,7 @@
   {
     "name": "canvas-authoring",
     "description": "Toolkit setup and Azure or counter starters for the host’s native `create-canvas` skill; skill-only, not a canvas extension.  Includes prebuilt packages and guidance for styles, sign in, subscriptions, telemetry, and more.",
-    "version": "0.1.3",
+    "version": "0.1.5",
     "author": {
       "name": "Alex Weininger"
     },
@@ -779,7 +831,7 @@
       "source": "github",
       "repo": "microsoft/azure-dev-tools",
       "path": "plugins/canvas-authoring",
-      "sha": "0cebd139704378c24dc5c1ec0b952639c946c5ba"
+      "sha": "2c9177926574c3b372533d55dc5d426b406322ed"
     }
   },
   {
@@ -970,6 +1022,33 @@
     }
   },
   {
+    "name": "copilot-kubuntu-desktop-kit",
+    "description": "Unofficial Copilot CLI integration for Kubuntu/KDE Wayland, with six focused\nskills, four agents, and opt-in portal-based desktop control using the existing\ncomputer-use-linux backend.",
+    "version": "0.1.0",
+    "author": {
+      "name": "Kubuntu Desktop Kit contributors",
+      "url": "https://github.com/arjith/copilot-kubuntu-desktop-kit/graphs/contributors"
+    },
+    "repository": "https://github.com/arjith/copilot-kubuntu-desktop-kit",
+    "homepage": "https://arjith.github.io/copilot-kubuntu-desktop-kit/",
+    "license": "MIT",
+    "keywords": [
+      "copilot",
+      "kubuntu",
+      "kde",
+      "wayland",
+      "desktop",
+      "python",
+      "cuda"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "arjith/copilot-kubuntu-desktop-kit",
+      "ref": "v0.1.0",
+      "sha": "02d3a7f653c6038e92729b709c64cdb3a4135d49"
+    }
+  },
+  {
     "name": "copilot-session-dj",
     "description": "A playful, local Strudel soundtrack for the current GitHub Copilot session and its subagents. Includes an English/Japanese DJ Canvas, three synth-only presets, and silent-until-clicked playback with explicit stop controls.",
     "version": "0.1.0",
@@ -1137,6 +1216,35 @@
       "source": "github",
       "repo": "aaronpowell/github-copilot-dependabot-canvas",
       "sha": "206c4682b6f383f631b35b9a51408fb46789eac1"
+    }
+  },
+  {
+    "name": "docspring",
+    "description": "Fill PDF and Word templates, generate PDFs from HTML templates and collect e-signatures with DocSpring. Eight skills (PDF, HTML and Word templates, page designs, API integration, signature requests, embedded forms) plus DocSpring's remote MCP server.",
+    "version": "1.10.2",
+    "author": {
+      "name": "DocSpring",
+      "url": "https://docspring.com"
+    },
+    "repository": "https://github.com/DocSpring/skills",
+    "homepage": "https://docspring.com/connect-your-ai",
+    "license": "MIT",
+    "keywords": [
+      "docspring",
+      "pdf",
+      "pdf-generation",
+      "pdf-forms",
+      "html-to-pdf",
+      "docx",
+      "e-signature",
+      "templates",
+      "mcp"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "DocSpring/skills",
+      "ref": "v1.10.2",
+      "sha": "b9e29fd65509ff78059ae99e45cef7a8b74a8656"
     }
   },
   {
@@ -1413,6 +1521,36 @@
       "repo": "artemnovichkov/foundation-models-plugin",
       "ref": "0.1.3",
       "sha": "5837a9343db97d59107d146024b1dbd858625274"
+    }
+  },
+  {
+    "name": "foundry-iq-skills",
+    "description": "Create and retrieve from a Foundry IQ knowledge base using File, Azure Blob, or ADLS Gen2, then connect an existing Prompt or Hosted Agent.",
+    "version": "0.3.2",
+    "author": {
+      "name": "Microsoft",
+      "url": "https://www.microsoft.com"
+    },
+    "repository": "https://github.com/microsoft/azure-skills",
+    "homepage": "https://github.com/microsoft/github-copilot-for-azure",
+    "license": "MIT",
+    "keywords": [
+      "azure",
+      "azure-ai-search",
+      "rag",
+      "grounding",
+      "foundry-iq",
+      "knowledge-base",
+      "retrieval",
+      "citations",
+      "prompt-agent",
+      "hosted-agent"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "microsoft/azure-skills",
+      "path": ".github/plugins/foundry-iq-skills",
+      "sha": "0e26cd9c153ca37a04ad7b01f0dc8766a9e14038"
     }
   },
   {
@@ -2017,8 +2155,8 @@
   },
   {
     "name": "new-relic",
-    "description": "The New Relic plugin connects GitHub Copilot to your New Relic data in VS Code, Copilot CLI, and the Copilot app. Ask in plain language about errors, latency, logs, traces, alerts, deployments, and dashboards, or run NRQL directly. Includes the hosted New Relic MCP server with OAuth sign-in (no API key), three skills (/nrsetup, /nrql, /nrinvestigate), and four agents: APM, Incident Response, Kubernetes, and FinOps.",
-    "version": "0.2.0",
+    "description": "The New Relic plugin connects GitHub Copilot to your New Relic data in VS Code, Copilot CLI, and the Copilot app. Ask in plain language about errors, latency, logs, traces, alerts, deployments, and dashboards, or run NRQL directly. Includes the hosted New Relic MCP server with OAuth sign-in (no API key), four skills (/nrsetup, /nrql, /nrinvestigate, /kafka for consumer lag, partition, broker, and throughput analysis), and four agents: APM, Incident Response, Kubernetes, and FinOps.",
+    "version": "0.3.0",
     "author": {
       "name": "New Relic",
       "url": "https://newrelic.com"
@@ -2035,8 +2173,8 @@
     "source": {
       "source": "github",
       "repo": "newrelic-partners/Github-Copilot-plugin",
-      "ref": "v0.2.0",
-      "sha": "146d466fd571237e12cec46345fccc39aceb86bd"
+      "ref": "v0.3.0",
+      "sha": "20232c0f125f0fd9939677c4c249e46c612ac583"
     }
   },
   {
@@ -2093,6 +2231,34 @@
       "repo": "Sagargupta16/orrery",
       "ref": "v0.4.0",
       "sha": "69942d3358d492a9b328ef35164b8f4ed41a0493"
+    }
+  },
+  {
+    "name": "outlook-assistant",
+    "description": "Microsoft Outlook email, calendar and contacts for Copilot. 22 MCP tools via Microsoft Graph, with a safety skill, a hook that asks before anything reaches other people, dry-run previews, read-only mode, per-session send limits and recipient allowlists. Works with Outlook.com and Microsoft 365.",
+    "version": "3.14.2",
+    "author": {
+      "name": "Little Bear Apps",
+      "url": "https://littlebearapps.com"
+    },
+    "repository": "https://github.com/littlebearapps/outlook-assistant",
+    "homepage": "https://littlebearapps.com/builds/outlook-assistant/",
+    "license": "MIT",
+    "keywords": [
+      "outlook",
+      "email",
+      "calendar",
+      "contacts",
+      "microsoft-365",
+      "microsoft-graph",
+      "mcp"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "littlebearapps/outlook-assistant",
+      "path": "plugins/outlook-assistant",
+      "ref": "v3.14.2",
+      "sha": "18d266958b6628d3fdc7e4f337658f048607e689"
     }
   },
   {
@@ -2176,9 +2342,36 @@
     }
   },
   {
+    "name": "postman",
+    "description": "Work with Postman from your agent: bootstrap a repo's Postman setup, mock an API before it's implemented, run collection and governance checks in CI, monitor a live endpoint, deploy and debug Postman Flows, and publish generated API documentation.",
+    "version": "0.3.0",
+    "author": {
+      "name": "postman",
+      "url": "https://www.postman.com"
+    },
+    "repository": "https://github.com/postmanlabs/postman-plugin",
+    "homepage": "https://www.postman.com",
+    "license": "Apache-2.0",
+    "keywords": [
+      "postman",
+      "api",
+      "mocking",
+      "monitoring",
+      "ci",
+      "documentation",
+      "flows"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "postmanlabs/postman-plugin",
+      "path": "agent-plugin",
+      "sha": "6936c4e3b882c4edad444f99aab14fb3573df5ac"
+    }
+  },
+  {
     "name": "radius",
     "description": "Model, visualize, and deploy applications with Radius from the GitHub Copilot app and CLI.",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "author": {
       "name": "Radius",
       "url": "https://radapp.io"
@@ -2199,8 +2392,8 @@
       "source": "github",
       "repo": "radius-project/ai-extensions",
       "path": "plugins/radius",
-      "ref": "radius@0.5.0",
-      "sha": "a57a7f6465dcd3f46037477124ddf096bbf96ae9"
+      "ref": "radius@0.6.0",
+      "sha": "caaa419fceb6ab06f8791ce8e7c309c2891d30b6"
     }
   },
   {
@@ -2475,7 +2668,7 @@
   {
     "name": "sumo-logic",
     "description": "Query Sumo Logic logs, alerts, dashboards, and SIEM insights directly from Copilot.",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "author": {
       "name": "Sumo Logic",
       "url": "https://www.sumologic.com"
@@ -2498,8 +2691,35 @@
     "source": {
       "source": "github",
       "repo": "SumoLogic/sumologic-ai-plugins",
-      "ref": "v1.0.1",
-      "sha": "f905b914984fabb5e0571290eafd3013c277d9b1"
+      "ref": "v1.1.0",
+      "sha": "0b4cea497496fad04f6a5d4514b29ef52669b728"
+    }
+  },
+  {
+    "name": "telegram-bot-ui",
+    "description": "UI/UX skill that makes Telegram bots look and feel like real products: messages, keyboards, buttons, navigation, streaming AI replies with Stop, HTML widgets, premium emoji, channel publishing and agent-operated bots. Updated with every new Bot API release.",
+    "version": "2.0.0",
+    "author": {
+      "name": "hlibsuslov",
+      "url": "https://github.com/hlibsuslov"
+    },
+    "repository": "https://github.com/hlibsuslov/telegram-bot-ui",
+    "license": "MIT",
+    "keywords": [
+      "telegram",
+      "telegram-bot",
+      "bot-api",
+      "ui",
+      "ux",
+      "widgets",
+      "channels",
+      "agent-skills"
+    ],
+    "source": {
+      "source": "github",
+      "repo": "hlibsuslov/telegram-bot-ui",
+      "ref": "v2.0.0",
+      "sha": "e5e53e23f11e57a76f34ac0e6341a75187ccb296"
     }
   },
   {
@@ -2529,7 +2749,7 @@
   {
     "name": "tmforge",
     "description": "The Strider agent that comes with the tmforge plugin adds evidence-backed STRIDE threat modeling to GitHub Copilot, with structured risk assessment, deterministic validation, and Markdown reports. Optional tmforge integration supports creating, updating, and verifying Microsoft Threat Modeling Tool (.tm7) models.",
-    "version": "0.11.0",
+    "version": "0.14.3",
     "author": {
       "name": "Mark Dalton Gray",
       "url": "https://github.com/Hacks4Snacks"
@@ -2553,8 +2773,8 @@
       "source": "github",
       "repo": "Hacks4Snacks/tmforge",
       "path": "plugins/tmforge",
-      "ref": "v0.11.0",
-      "sha": "8c22d85c4cb65f416c228bb2a73ae9f364aa549b"
+      "ref": "v0.14.3",
+      "sha": "0018d145e8563a893ba07e1194ffe1cb9e67e9c5"
     }
   },
   {
